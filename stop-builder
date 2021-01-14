@@ -1,0 +1,2 @@
+docker stop cray-ipxe-builder-devel
+docker rm cray-ipxe-builder-devel

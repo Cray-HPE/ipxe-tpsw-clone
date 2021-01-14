@@ -1,0 +1,9 @@
+# Cray Docker packaging for the iPXE stack
+# Copyright 2018, Cray Inc. All rights reserved.
+
+# Create a building layer, which contains all of the dependencies to compile
+# new content using this library
+FROM dtr.dev.cray.com/dst/centos7_epel_dst_repo:v1.0
+LABEL vendor="Cray, Inc."
+RUN yum install -y gcc binutils make perl liblzma mtools mkisofs syslinux xz xz-devel && yum clean all
+
