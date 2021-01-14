@@ -1,0 +1,28 @@
+#!/bin/bash
+# Copyright 2021 Hewlett Packard Enterprise Development LP
+
+SCRIPT_DIR=$(dirname $(which $0))
+
+#
+# Find newest build_common.shrc
+#
+
+# backup old one
+if [ -f build_common.shrc ] ; then
+  mv build_common.shrc build_common.shrc.bk
+fi
+
+# for Jenkins builds - find the directory
+COMMON_SUBDIR=multibranch-build-common/branches/master/builds/lastSuccessfulBuild/archive/build
+for d in \
+  ../../jobs/$COMMON_SUBDIR \
+  ../../../jobs/$COMMON_SUBDIR \
+  ../../$COMMON_SUBDIR
+  do
+  if [ -f $SCRIPT_DIR/$d/build_common.shrc ] ; then
+    cp --preserve=timestamps $SCRIPT_DIR/$d/build_common.shrc .
+    break
+  fi
+done
+
+source build_common.shrc

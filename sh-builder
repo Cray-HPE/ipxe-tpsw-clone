@@ -1,0 +1,1 @@
+docker exec -it cray-ipxe-builder-devel /bin/sh

@@ -1,0 +1,5 @@
+docker run -it \
+  --name cray-ipxe-builder-devel \
+  -v $PWD:/home/ipxe \
+  -d \
+  local/cray-ipxe-builder-devel

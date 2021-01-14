@@ -1,0 +1,1 @@
+docker build --rm -t local/cray-ipxe-builder-devel . -f Dockerfile.devel
