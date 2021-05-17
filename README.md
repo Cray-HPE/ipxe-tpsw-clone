@@ -32,3 +32,8 @@
 - This repo also tracks the external ipxe Git repo at https://git.ipxe.org/ipxe.git
 - Future updates to the ipxe source can be fetched from the external repo into a branch where they can be integrated, tested and then merged into master using the standard PR process.
 
+## Versioning
+Use [SemVer](http://semver.org/). The version is located in the [.version](.version) file. 
+
+## Copyright and License
+See each individual file for information on its copyright and license.
