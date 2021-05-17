@@ -1,0 +1,10 @@
+###################################################################################
+# Note: This is a config file for the file_filter tool, used to refine the scope
+# of files that should be checked by the go_lint tool. Both tools can be found in
+# the cms-meta-tools repo.
+###################################################################################
+
+# We don't want to bother linting code that isn't ours
+also_exclude_directories:
+    - "contrib"
+    - "src"
