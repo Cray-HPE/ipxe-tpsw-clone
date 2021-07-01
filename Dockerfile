@@ -23,7 +23,7 @@
 
 # Create a building layer, which contains all of the dependencies to compile
 # new content using this library
-FROM arti.dev.cray.com/baseos-docker-master-local/alpine:3.12.4
+FROM arti.dev.cray.com/baseos-docker-master-local/alpine:3.13.5
 LABEL vendor="Cray, Inc."
 RUN apk add gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
 
