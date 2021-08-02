@@ -23,7 +23,7 @@
 
 # Create a building layer, which contains all of the dependencies to compile
 # new content using this library
-FROM arti.dev.cray.com/baseos-docker-master-local/alpine:3.13.5
+FROM artifactory.algol60.net/docker.io/alpine:3.13 as base
 LABEL vendor="Cray, Inc."
 RUN apk add gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
 
@@ -32,6 +32,8 @@ COPY src /ipxe
 
 # Set the operational working directory for builds to be inside the ipxe dir
 WORKDIR /ipxe
+
+FROM base as faster-build
 
 # Make a number of staticly compiled ROMs; this primes the image by linking the
 # appropriate C objects, which speeds up the creation of images in the next
