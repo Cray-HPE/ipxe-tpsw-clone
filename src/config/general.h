@@ -156,6 +156,22 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #define CERT_CMD		/* Certificate management commands */
 
 /*
+ * DHCP-specific options
+ *
+ */
+#undef DHCP_DISC_START_TIMEOUT_SEC
+#define DHCP_DISC_START_TIMEOUT_SEC	4
+
+#undef DHCP_DISC_END_TIMEOUT_SEC
+#define DHCP_DISC_END_TIMEOUT_SEC	32
+
+#undef DHCP_DISC_MAX_DEFERRALS
+#define DHCP_DISC_MAX_DEFERRALS		180
+
+#undef LINK_WAIT_TIMEOUT
+#define LINK_WAIT_TIMEOUT ( 45 * TICKS_PER_SEC )
+
+/*
  * ROM-specific options
  *
  */
