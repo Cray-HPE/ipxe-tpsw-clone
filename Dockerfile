@@ -23,6 +23,7 @@
 
 # Create a building layer, which contains all of the dependencies to compile
 # new content using this library
+
 FROM artifactory.algol60.net/docker.io/alpine:3.13 as base
 LABEL vendor="Cray, Inc."
 RUN apk add gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
