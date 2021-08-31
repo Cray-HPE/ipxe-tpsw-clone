@@ -26,7 +26,10 @@
 
 FROM artifactory.algol60.net/docker.io/alpine:3.13 as base
 LABEL vendor="Cray, Inc."
-RUN apk add gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
+RUN apk add --upgrade --no-cache apk-tools
+RUN apk update
+RUN apk add --no-cache gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
+RUN apk -U upgrade --no-cache
 
 # Add the source directory into the image
 COPY src /ipxe
