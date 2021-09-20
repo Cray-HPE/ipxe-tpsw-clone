@@ -1,4 +1,4 @@
-# Cray Docker packaging for the iPXE stack
+#Cray Docker packaging for the iPXE stack
 # Copyright 2018, 2021 Hewlett Packard Enterprise Development LP
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
@@ -23,9 +23,12 @@
 
 # Create a building layer, which contains all of the dependencies to compile
 # new content using this library
-FROM dtr.dev.cray.com/baseos/alpine:3.12.0
+FROM artifactory.algol60.net/docker.io/alpine:3.13 as base
 LABEL vendor="Cray, Inc."
-RUN apk add gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
+RUN apk add --upgrade --no-cache apk-tools
+RUN apk update
+RUN apk add --no-cache gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
+RUN apk -U upgrade --no-cache
 
 # Add the source directory into the image
 COPY src /ipxe
