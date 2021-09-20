@@ -1,5 +1,4 @@
-#Cray Docker packaging for the iPXE stack
-# Copyright 2018, 2021 Hewlett Packard Enterprise Development LP
+# Copyright 2021 Hewlett Packard Enterprise Development LP
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -21,25 +20,19 @@
 #
 # (MIT License)
 
-# Create a building layer, which contains all of the dependencies to compile
-# new content using this library
-FROM artifactory.algol60.net/docker.io/alpine:3.13 as base
-LABEL vendor="Cray, Inc."
-RUN apk add --upgrade --no-cache apk-tools
-RUN apk update
-RUN apk add --no-cache gcc binutils make perl mtools syslinux xz xz-libs cdrkit xz-dev libc-dev bash
-RUN apk -U upgrade --no-cache
+# If you wish to perform a local build, you will need to clone or copy the contents of the
+# cms-meta-tools repo to ./cms_meta_tools
 
-# Add the source directory into the image
-COPY src /ipxe
+NAME ?= cray-tpsw-ipxe
+DOCKER_VERSION ?= $(shell head -1 .docker_version)
 
-# Set the operational working directory for builds to be inside the ipxe dir
-WORKDIR /ipxe
+all : runbuildprep lint image 
 
-# Make a number of staticly compiled ROMs; this primes the image by linking the
-# appropriate C objects, which speeds up the creation of images in the next
-# downstream docker image
-RUN make bin/undionly.kpxe && \
-    make bin/ipxe.iso && \
-    make bin/ipxe.usb && \
-    make bin-x86_64-efi/ipxe.efi
+runbuildprep:
+		./cms_meta_tools/scripts/runBuildPrep.sh
+
+lint:
+		./cms_meta_tools/scripts/runLint.sh
+
+image:
+		docker build --pull ${DOCKER_ARGS} --tag '${NAME}:${DOCKER_VERSION}' .
