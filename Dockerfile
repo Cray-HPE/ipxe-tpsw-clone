@@ -38,7 +38,7 @@ RUN apt -y install gcc make gcc-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
                    genisoimage xz-utils libc-dev bash git
 
 # Add the source directory into the image
-COPY src /ipxe
+COPY vendor/github.com/Cray-HPE/ipxe/src /ipxe
 
 # In the near future, we will not copy a local checkout of the ipxe source.
 # Instead, we will checkout from the official repository via a tag or a
@@ -75,12 +75,12 @@ COPY etc /sample
 RUN make bin/undionly.kpxe
 RUN make bin/ipxe.iso
 RUN make bin/ipxe.usb
-RUN make bin-x86_64-efi/ipxe.efi
+RUN make CONFIG=hpc bin-x86_64-efi/ipxe.efi
 # Workflow for basic x86 based ipxe.efi nodes
 RUN cp /sample/cert_sample /ipxe/cert_sample && \
     cp /sample/bss_sample_script.txt /ipxe/bss_sample_script.txt && \
     export TOKEN=$(cat /sample/s3_sample_jwt) && \
-    make bin-x86_64-efi/ipxe.efi \
+    make CONFIG=hpc bin-x86_64-efi/ipxe.efi \
         DEBUG=httpcore,x509,efi_time \
         CERT=cert_sample TRUST=cert_sample \
         EMBED=bss_sample_script.txt && \
@@ -90,9 +90,10 @@ RUN cp /sample/cert_sample /ipxe/cert_sample && \
 RUN cp /sample/cert_sample /ipxe/cert_sample && \
     cp /sample/bss_sample_script.txt /ipxe/bss_sample_script.txt && \
     export TOKEN=$(cat /sample/s3_sample_jwt) && \
-    make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 bin-arm64-efi/ipxe.efi \
+    make CONFIG=hpc CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 bin-arm64-efi/ipxe.efi \
         DEBUG=httpcore,x509,efi_time \
         CERT=cert_sample TRUST=cert_sample \
         EMBED=bss_sample_script.txt && \
         BEARER_TOKEN=$TOKEN && \
     rm /ipxe/cert_sample /ipxe/bss_sample_script.txt /ipxe/bin-arm64-efi/ipxe.efi
+
