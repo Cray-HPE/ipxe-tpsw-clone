@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- Use Cray-HPE/ipxe fork
+- Use `hpc` iPXE configuration
 - Disabled concurrent Jenkins builds on same branch/commit
 - Added build timeout to avoid hung builds
 
