@@ -1,0 +1,66 @@
+#!ipxe
+
+echo Chaining to BSS; trying interfaces net2, net0, net1, net3, net4, net5...
+
+set attempt:int32 0
+set maxattempts:int32 1024
+set sleepytime:int32 0
+set ceiling:int32 64
+
+:start
+inc attempt
+inc sleepytime
+iseq ${sleepytime} ${ceiling} && set sleepytime:int32 63 ||
+iseq ${attempt} ${maxattempts} && goto debug_retry ||
+
+echo Chain attempt ${attempt} of ${maxattempts}
+:net2
+dhcp net2 || goto net2_stop
+echo net2 IPv4 lease: ${ip} mac: ${net2/mac}
+
+chain --timeout 10000 https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net2/mac} || echo Failed to retrieve next chain from Boot Script Service over net2 (https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net2/mac} && goto net2_stop
+:net2_stop
+ifclose net2 || echo No routes to drop.
+:net0
+dhcp net0 || goto net0_stop
+echo net0 IPv4 lease: ${ip} mac: ${net0/mac}
+
+chain --timeout 10000 https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net0/mac} || echo Failed to retrieve next chain from Boot Script Service over net0 (https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net0/mac} && goto net0_stop
+:net0_stop
+ifclose net0 || echo No routes to drop.
+:net1
+dhcp net1 || goto net1_stop
+echo net1 IPv4 lease: ${ip} mac: ${net1/mac}
+
+chain --timeout 10000 https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net1/mac} || echo Failed to retrieve next chain from Boot Script Service over net1 (https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net1/mac} && goto net1_stop
+:net1_stop
+ifclose net1 || echo No routes to drop.
+:net3
+dhcp net3 || goto net3_stop
+echo net3 IPv4 lease: ${ip} mac: ${net3/mac}
+
+chain --timeout 10000 https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net3/mac} || echo Failed to retrieve next chain from Boot Script Service over net3 (https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net3/mac} && goto net3_stop
+:net3_stop
+ifclose net3 || echo No routes to drop.
+:net4
+dhcp net4 || goto net4_stop
+echo net4 IPv4 lease: ${ip} mac: ${net4/mac}
+
+chain --timeout 10000 https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net4/mac} || echo Failed to retrieve next chain from Boot Script Service over net4 (https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net4/mac} && goto net4_stop
+:net4_stop
+ifclose net4 || echo No routes to drop.
+:net5
+dhcp net5 || goto net5_stop
+echo net5 IPv4 lease: ${ip} mac: ${net5/mac}
+
+chain --timeout 10000 https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net5/mac} || echo Failed to retrieve next chain from Boot Script Service over net5 (https://api-gw-service-nmn.local/apis/bss/boot/v1/bootscript?mac=${net5/mac} && goto net5_stop
+:net5_stop
+ifclose net5 || echo No routes to drop.
+
+echo Failure to chain to BSS over networks associated with NICS: net2, net0, net1, net3, net4, net5; retrying in ${sleepytime} seconds...
+sleep ${sleepytime}
+goto start
+
+:debug_retry
+echo IPXE failed to retrieve next chain over configured nic networks to a BSS instance after ${maxattempts}.
+shell

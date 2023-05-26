@@ -5,6 +5,30 @@
    cd src
    make
 
+## Maintaining
+
+### Where did this repo come from and how is it used?
+- This repo is a clone of the scms ipxe-tpsw-fork repo which was obtained from the Cray TPSW ipxe repo which was last updated on 08/21/2018.  The repo also contains Cray ipxe customizations.
+- This repo uses the master branch for current code development.
+- The base Docker image for the cms-ipxe container is built from the contents of this repo.
+- This repo also tracks the external ipxe Git repo at https://git.ipxe.org/ipxe.git
+- Future updates to the ipxe source can be fetched from the external repo into a branch where they can be integrated, tested and then merged into master using the standard PR process.
+
+Significant changes should be first vetted in the opensource community, and if possible, picked from the upstream
+source.
+### Patches
+Features should be implemented in the form of patch files that can be found in the patches directory. Patches are
+applied to the upstream source at docker build time, such that when the docker build is finished, all affected changes
+to the source should be able to be pre-built using one of the existing pre-compile build tests. This ensures a
+pre-checkout test as well as an opportunity to compile linked objects within the build environment ahead of time.
+
+#### Creating a Patch
+Standard linux patch/diff tools are used:
+    diff -u /ipxe/config/general.h /ipxe/config/general.h.new > /patches/enable_https.patch
+
+Add your patch to patches/apply.sh
+
+
 ## Developing in an OSX environment
 - If you want to make changes to the ipxe source code, recompile, and boot your image in a VM then read on.
 - Build and run a Docker image with the dependencies for making ipxe. 
@@ -25,12 +49,6 @@
 ## Other iPXE resources
 - For any more detailed instructions, see http://ipxe.org
 
-## Where did this repo come from and how is it used?
-- This repo is a clone of the scms ipxe-tpsw-fork repo which was obtained from the Cray TPSW ipxe repo which was last updated on 08/21/2018.  The repo also contains Cray ipxe customizations.
-- This repo uses the master branch for current code development.
-- The base Docker image for the cms-ipxe container is built from the contents of this repo.
-- This repo also tracks the external ipxe Git repo at https://git.ipxe.org/ipxe.git
-- Future updates to the ipxe source can be fetched from the external repo into a branch where they can be integrated, tested and then merged into master using the standard PR process.
 
 ## Build Helpers
 This repo uses some build helpers from the 
