@@ -11,7 +11,7 @@ updates:
     schedule:
       interval: "daily"
     assignees:
-      - "Cray-HPE/Cray-Management-Systems"
+      - "Cray-HPE/CMS-core-product-support"
     labels:
       - "github-actions-deps"
       - "dependabot"
