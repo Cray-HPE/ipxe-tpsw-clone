@@ -73,7 +73,6 @@ WORKDIR /ipxe
 FROM patch as precompile
 COPY etc /sample
 RUN make bin/undionly.kpxe
-RUN make bin/ipxe.iso
 RUN make bin/ipxe.usb
 RUN make CONFIG=hpc bin-x86_64-efi/ipxe.efi
 # Workflow for basic x86 based ipxe.efi nodes
