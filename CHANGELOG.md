@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 - Bump `actions/checkout` from 3 to 4 ([#29](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/29))
+- Bump `stefanzweifel/git-auto-commit-action` from 4 to 5 ([#30](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/30))
 
 ## [3.0.0] - 2023-05-26
 ### Removed
