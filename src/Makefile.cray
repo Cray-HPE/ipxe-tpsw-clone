@@ -1,9 +1,0 @@
-# Embedded Authorization token support
-#
-CFLAGS += $(if $(BEARER_TOKEN),-DHTTP_AUTH_BEARER -DHTTP_AUTH_BEARER_TOKEN="\"$(BEARER_TOKEN)\"")
-
-# AWS S3 gateway Host.
-# A default host name is used unless S3_HOST is passed to make.
-#
-S3_HOST ?= rgw.local
-CFLAGS += -DS3_HOST=\"$(S3_HOST)\"
