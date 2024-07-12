@@ -124,6 +124,10 @@ static struct http_state http_headers;
 static struct http_state http_trailers;
 static struct http_transfer_encoding http_transfer_identity;
 
+#ifdef HTTP_AUTH_BEARER
+static int http_redirect_request = 0;
+#endif
+
 /******************************************************************************
  *
  * Methods
@@ -701,6 +705,10 @@ static int http_redirect ( struct http_transaction *http,
 	int rc;
 
 	DBGC2 ( http, "HTTP %p redirecting to \"%s\"\n", http, location );
+#ifdef HTTP_AUTH_BEARER
+	http_redirect_request=1;
+#endif
+
 
 	/* Parse location URI */
 	location_uri = parse_uri ( location );
@@ -840,6 +848,11 @@ static int http_format_headers ( struct http_transaction *http, char *buf,
 	int value_len;
 	int rc;
 
+	/* Host and path debug info */
+	DBGC2 ( http, "HTTP http_format_headers %p TX request host: %s\n", http, http->uri->host );
+	DBGC2 ( http, "HTTP http_format_headers %p TX request path: %s\n", http, http->uri->path );
+	DBGC2 ( http, "HTTP http_format_headers %p TX S3_HOST: %s\n", http, S3_HOST );
+
 	/* Construct request line */
 	used = ssnprintf ( buf, len, "%s %s HTTP/1.1",
 			   http->request.method->name, http->request.uri );
@@ -860,6 +873,17 @@ static int http_format_headers ( struct http_transaction *http, char *buf,
 		/* Skip zero-length headers */
 		if ( ! value_len )
 			continue;
+
+#ifdef HTTP_AUTH_BEARER
+		/* Skip Authorization header on a redirect or if going directly to S3 */
+		if ( http_redirect_request == 1 || strcmp( S3_HOST, http->uri->host ) == 0 ) {
+			if ( ! strcmp("Authorization",header->name) ) {
+				DBGC2 ( http, "HTTP %p TX not including header: %s\n", http, header->name );
+				continue;
+			}
+		}
+#endif
+
 
 		/* Construct header */
 		line = ( buf + used );
@@ -1102,6 +1126,13 @@ static int http_tx_request ( struct http_transaction *http ) {
 	assert ( check_len == len );
 	memcpy ( iob_put ( iobuf, http->request.content.len ),
 		 http->request.content.data, http->request.content.len );
+
+#ifdef HTTP_AUTH_BEARER
+	/* Were done processing headers so reset the flag */
+	if ( http_redirect_request == 1 ) {
+		http_redirect_request=0;
+	}
+#endif
 
 	/* Deliver request */
 	if ( ( rc = xfer_deliver_iob ( &http->conn,
@@ -1989,6 +2020,29 @@ int http_open_uri ( struct interface *xfer, struct uri *uri ) {
  err_alloc:
 	return rc;
 }
+
+#ifdef HTTP_AUTH_BEARER
+/**
+ * Construct HTTP "Authorization: Bearer token" header
+ *
+ * @v http		HTTP transaction
+ * @v buf		Buffer
+ * @v len		Length of buffer
+ * @ret len		Length of header value, or negative error
+ */
+static int http_format_authorization_bearer ( struct http_transaction *http __unused,
+				    char *buf, size_t len ) {
+
+	/* Construct bearer token */
+	return snprintf ( buf, len, "Bearer %s",  HTTP_AUTH_BEARER_TOKEN );
+}
+
+/** HTTP "Authorization: Bearer" header */
+struct http_request_header http_request_authorization_bearer __http_request_header = {
+	.name = "Authorization",
+	.format = http_format_authorization_bearer,
+};
+#endif // HTTP_AUTH_BEARER
 
 /* Drag in HTTP extensions */
 REQUIRING_SYMBOL ( http_open );

@@ -722,6 +722,8 @@ $(CONFIG_LIST) : $(MAKEDEPS)
 
 VERYCLEANUP += $(CONFIG_LIST)
 
+include Makefile.cray
+
 # Named configurations
 #
 ifneq ($(CONFIG),)

@@ -143,8 +143,10 @@ static int efipci_root_open ( struct pci_device *pci, EFI_HANDLE *handle,
 		void *interface;
 		EFI_PCI_ROOT_BRIDGE_IO_PROTOCOL *root;
 	} u;
+	EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *acpi;
 	EFI_STATUS efirc;
 	UINTN i;
+	uint16_t bus = PCI_BUS (pci->busdevfn);
 	int rc;
 
 	/* Enumerate all handles */
@@ -174,6 +176,37 @@ static int efipci_root_open ( struct pci_device *pci, EFI_HANDLE *handle,
 			*root = u.root;
 			bs->FreePool ( handles );
 			return 0;
+			/**
+			  * Just matching PCI_SEG is insufficient
+			  * We need to check the bus ranges in the ACPI address space
+			  * descriptor to determine correct root bridge I/O protocol handle
+			  */
+			if ( (efirc = u.root->Configuration (u.root, (void **) &acpi)) != 0) {
+				rc = -EEFI ( efirc );
+				DBGC ( pci, "EFIPCI " PCI_FMT " cannot get address space descriptor %s: %s\n",
+					   PCI_ARGS ( pci ), efi_handle_name ( *handle ), strerror ( rc ) );
+				continue;
+			}
+			/**
+			 * if acpi is NULL, Configuration() is not implemented
+			 * and this root bridge covers all buses
+			 */
+			if (acpi == NULL) {
+				*root = u.root;
+				rc = 0;
+				goto out;
+			} else {
+				while (acpi->Desc != ACPI_END_TAG_DESCRIPTOR) {
+					if ( (acpi->ResType == ACPI_ADDRESS_SPACE_TYPE_BUS) &&
+						 (bus >= (uint16_t) acpi->AddrRangeMin) &&
+						 (bus <= (uint16_t) acpi->AddrRangeMax)) {
+							*root = u.root;
+							rc = 0;
+							goto out;
+					}
+					acpi++;
+				}
+			}
 		}
 		bs->CloseProtocol ( *handle,
 				    &efi_pci_root_bridge_io_protocol_guid,
@@ -183,6 +216,7 @@ static int efipci_root_open ( struct pci_device *pci, EFI_HANDLE *handle,
 	       PCI_ARGS ( pci ) );
 	rc = -ENOENT;
 
+ out:
 	bs->FreePool ( handles );
  err_locate:
 	return rc;

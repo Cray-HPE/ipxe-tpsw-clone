@@ -35,7 +35,7 @@ FROM $BASE_IMAGE as base
 LABEL vendor="Cray, Inc."
 RUN apt -y update
 RUN apt -y install gcc make gcc-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
-                   genisoimage xz-utils libc-dev bash git
+                   genisoimage xz-utils libc-dev bash git isolinux
 
 # Add the source directory into the image
 COPY src /ipxe
