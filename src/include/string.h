@@ -15,6 +15,8 @@ extern void * generic_memset ( void *dest, int character,
 			       size_t len ) __nonnull;
 extern void * generic_memcpy ( void *dest, const void *src,
 			       size_t len ) __nonnull;
+extern void * generic_memcpy_reverse ( void *dest, const void *src,
+				       size_t len ) __nonnull;
 extern void * generic_memmove ( void *dest, const void *src,
 				size_t len ) __nonnull;
 
@@ -41,6 +43,7 @@ extern char * __pure strchr ( const char *src, int character ) __nonnull;
 extern char * __pure strrchr ( const char *src, int character ) __nonnull;
 extern char * __pure strstr ( const char *haystack,
 			      const char *needle ) __nonnull;
+extern char * stpcpy ( char *dest, const char *src ) __nonnull;
 extern char * strcpy ( char *dest, const char *src ) __nonnull;
 extern char * strncpy ( char *dest, const char *src, size_t max ) __nonnull;
 extern char * strcat ( char *dest, const char *src ) __nonnull;

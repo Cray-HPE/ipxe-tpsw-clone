@@ -11,10 +11,10 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL )
 
 #define PXE_HACK_EB54			0x0001
 
-	.text
+	.section ".note.GNU-stack", "", @progbits
+	.code16
 	.arch i386
 	.org 0
-	.code16
 
 #include <librm.h>
 #include <undi.h>

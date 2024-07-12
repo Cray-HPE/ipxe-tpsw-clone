@@ -436,7 +436,7 @@ static void b44_free_rx_ring(struct b44_private *bp)
 			free_iob(bp->rx_iobuf[i]);
 			bp->rx_iobuf[i] = NULL;
 		}
-		free_dma(bp->rx, B44_RX_RING_LEN_BYTES);
+		free_phys(bp->rx, B44_RX_RING_LEN_BYTES);
 		bp->rx = NULL;
 	}
 }
@@ -446,11 +446,11 @@ static int b44_init_rx_ring(struct b44_private *bp)
 {
 	b44_free_rx_ring(bp);
 
-	bp->rx = malloc_dma(B44_RX_RING_LEN_BYTES, B44_DMA_ALIGNMENT);
+	bp->rx = malloc_phys(B44_RX_RING_LEN_BYTES, B44_DMA_ALIGNMENT);
 	if (!bp->rx)
 		return -ENOMEM;
 	if (!b44_address_ok(bp->rx)) {
-		free_dma(bp->rx, B44_RX_RING_LEN_BYTES);
+		free_phys(bp->rx, B44_RX_RING_LEN_BYTES);
 		return -ENOTSUP;
 	}
 
@@ -468,7 +468,7 @@ static int b44_init_rx_ring(struct b44_private *bp)
 static void b44_free_tx_ring(struct b44_private *bp)
 {
 	if (bp->tx) {
-		free_dma(bp->tx, B44_TX_RING_LEN_BYTES);
+		free_phys(bp->tx, B44_TX_RING_LEN_BYTES);
 		bp->tx = NULL;
 	}
 }
@@ -478,11 +478,11 @@ static int b44_init_tx_ring(struct b44_private *bp)
 {
 	b44_free_tx_ring(bp);
 
-	bp->tx = malloc_dma(B44_TX_RING_LEN_BYTES, B44_DMA_ALIGNMENT);
+	bp->tx = malloc_phys(B44_TX_RING_LEN_BYTES, B44_DMA_ALIGNMENT);
 	if (!bp->tx)
 		return -ENOMEM;
 	if (!b44_address_ok(bp->tx)) {
-		free_dma(bp->tx, B44_TX_RING_LEN_BYTES);
+		free_phys(bp->tx, B44_TX_RING_LEN_BYTES);
 		return -ENOTSUP;
 	}
 
@@ -622,7 +622,7 @@ static void b44_load_mac_and_phy_addr(struct b44_private *bp)
 
 static void b44_set_rx_mode(struct net_device *netdev)
 {
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 	unsigned char zero[6] = { 0, 0, 0, 0, 0, 0 };
 	u32 val;
 	int i;
@@ -667,13 +667,13 @@ static int b44_probe(struct pci_device *pci)
 	netdev->dev = &pci->dev;
 
 	/* Set up private data */
-	bp = netdev_priv(netdev);
+	bp = netdev->priv;
 	memset(bp, 0, sizeof(*bp));
 	bp->netdev = netdev;
 	bp->pci = pci;
 
 	/* Map device registers */
-	bp->regs = ioremap(pci->membase, B44_REGS_SIZE);
+	bp->regs = pci_ioremap(pci, pci->membase, B44_REGS_SIZE);
 	if (!bp->regs) {
 		netdev_put(netdev);
 		return -ENOMEM;
@@ -712,7 +712,7 @@ static int b44_probe(struct pci_device *pci)
 static void b44_remove(struct pci_device *pci)
 {
 	struct net_device *netdev = pci_get_drvdata(pci);
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 
 	ssb_core_disable(bp);
 	unregister_netdev(netdev);
@@ -729,7 +729,7 @@ static void b44_remove(struct pci_device *pci)
  */
 static void b44_irq(struct net_device *netdev, int enable)
 {
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 
 	/* Interrupt mask specifies which events generate interrupts */
 	bw32(bp, B44_IMASK, enable ? IMASK_DEF : IMASK_DISABLE);
@@ -743,7 +743,7 @@ static void b44_irq(struct net_device *netdev, int enable)
  */
 static int b44_open(struct net_device *netdev)
 {
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 	int rc;
 
 	rc = b44_init_tx_ring(bp);
@@ -769,7 +769,7 @@ static int b44_open(struct net_device *netdev)
  */
 static void b44_close(struct net_device *netdev)
 {
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 
 	b44_chip_reset(bp, B44_FULL_RESET);
 	b44_free_tx_ring(bp);
@@ -785,7 +785,7 @@ static void b44_close(struct net_device *netdev)
  */
 static int b44_transmit(struct net_device *netdev, struct io_buffer *iobuf)
 {
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 	u32 cur = bp->tx_cur;
 	u32 ctrl;
 
@@ -905,7 +905,7 @@ static void b44_process_rx_packets(struct b44_private *bp)
  */
 static void b44_poll(struct net_device *netdev)
 {
-	struct b44_private *bp = netdev_priv(netdev);
+	struct b44_private *bp = netdev->priv;
 	u32 istat;
 
 	/* Interrupt status */
@@ -945,8 +945,8 @@ static struct net_device_operations b44_operations = {
 
 
 static struct pci_device_id b44_nics[] = {
-	PCI_ROM(0x14e4, 0x4401, "BCM4401", "BCM4401", 0),
 	PCI_ROM(0x14e4, 0x170c, "BCM4401-B0", "BCM4401-B0", 0),
+	PCI_ROM(0x14e4, 0x4401, "BCM4401", "BCM4401", 0),
 	PCI_ROM(0x14e4, 0x4402, "BCM4401-B1", "BCM4401-B1", 0),
 };
 

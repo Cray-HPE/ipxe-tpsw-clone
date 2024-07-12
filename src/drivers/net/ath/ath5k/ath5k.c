@@ -65,14 +65,11 @@ FILE_LICENCE ( BSD3 );
 
 /* Known PCI ids */
 static struct pci_device_id ath5k_nics[] = {
-	PCI_ROM(0x168c, 0x0207, "ath5210e", "Atheros 5210 early", AR5K_AR5210),
+	PCI_ROM(0x10b7, 0x0013, "rdag675", "3com 3CRDAG675", AR5K_AR5212),
 	PCI_ROM(0x168c, 0x0007, "ath5210", "Atheros 5210", AR5K_AR5210),
 	PCI_ROM(0x168c, 0x0011, "ath5311", "Atheros 5311 (AHB)", AR5K_AR5211),
 	PCI_ROM(0x168c, 0x0012, "ath5211", "Atheros 5211", AR5K_AR5211),
 	PCI_ROM(0x168c, 0x0013, "ath5212", "Atheros 5212", AR5K_AR5212),
-	PCI_ROM(0xa727, 0x0013, "ath5212c","3com Ath 5212", AR5K_AR5212),
-	PCI_ROM(0x10b7, 0x0013, "rdag675", "3com 3CRDAG675", AR5K_AR5212),
-	PCI_ROM(0x168c, 0x1014, "ath5212m", "Ath 5212 miniPCI", AR5K_AR5212),
 	PCI_ROM(0x168c, 0x0014, "ath5212x14", "Atheros 5212 x14", AR5K_AR5212),
 	PCI_ROM(0x168c, 0x0015, "ath5212x15", "Atheros 5212 x15", AR5K_AR5212),
 	PCI_ROM(0x168c, 0x0016, "ath5212x16", "Atheros 5212 x16", AR5K_AR5212),
@@ -83,6 +80,9 @@ static struct pci_device_id ath5k_nics[] = {
 	PCI_ROM(0x168c, 0x001b, "ath5413", "Atheros 5413 Eagle", AR5K_AR5212),
 	PCI_ROM(0x168c, 0x001c, "ath5212e", "Atheros 5212 PCI-E", AR5K_AR5212),
 	PCI_ROM(0x168c, 0x001d, "ath2417", "Atheros 2417 Nala", AR5K_AR5212),
+	PCI_ROM(0x168c, 0x0207, "ath5210e", "Atheros 5210 early", AR5K_AR5210),
+	PCI_ROM(0x168c, 0x1014, "ath5212m", "Ath 5212 miniPCI", AR5K_AR5212),
+	PCI_ROM(0xa727, 0x0013, "ath5212c","3com Ath 5212", AR5K_AR5212),
 };
 
 #define ATH5K_SPMBL_NO   1
@@ -280,7 +280,7 @@ static int ath5k_probe(struct pci_device *pdev)
 	 */
 	pci_write_config_byte(pdev, 0x41, 0);
 
-	mem = ioremap(pdev->membase, 0x10000);
+	mem = pci_ioremap(pdev, pdev->membase, 0x10000);
 	if (!mem) {
 		DBG("ath5k: cannot remap PCI memory region\n");
 		ret = -EIO;
@@ -877,7 +877,7 @@ ath5k_desc_alloc(struct ath5k_softc *sc)
 
 	/* allocate descriptors */
 	sc->desc_len = sizeof(struct ath5k_desc) * (ATH_TXBUF + ATH_RXBUF + 1);
-	sc->desc = malloc_dma(sc->desc_len, ATH5K_DESC_ALIGN);
+	sc->desc = malloc_phys(sc->desc_len, ATH5K_DESC_ALIGN);
 	if (sc->desc == NULL) {
 		DBG("ath5k: can't allocate descriptors\n");
 		ret = -ENOMEM;
@@ -915,7 +915,7 @@ ath5k_desc_alloc(struct ath5k_softc *sc)
 	return 0;
 
 err_free:
-	free_dma(sc->desc, sc->desc_len);
+	free_phys(sc->desc, sc->desc_len);
 err:
 	sc->desc = NULL;
 	return ret;
@@ -932,7 +932,7 @@ ath5k_desc_free(struct ath5k_softc *sc)
 		ath5k_rxbuf_free(sc, bf);
 
 	/* Free memory associated with all descriptors */
-	free_dma(sc->desc, sc->desc_len);
+	free_phys(sc->desc, sc->desc_len);
 
 	free(sc->bufptr);
 	sc->bufptr = NULL;

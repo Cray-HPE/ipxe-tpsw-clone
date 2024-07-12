@@ -23,9 +23,9 @@
 
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL )
 
-	.text
-	.arch i386
+	.section ".note.GNU-stack", "", @progbits
 	.code16
+	.arch i386
 
 #define SMAP 0x534d4150
 
@@ -67,7 +67,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL )
  ****************************************************************************
  */
 	.section ".data16", "aw", @progbits
-	.align 16
+	.balign 16
 	.globl hidemem_base
 	.globl hidemem_umalloc
 	.globl hidemem_textdata

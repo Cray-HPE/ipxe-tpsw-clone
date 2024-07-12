@@ -93,7 +93,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 
 /*
  * Debugging levels:
- *	- DBG() is for any errors, i.e. failed alloc_iob(), malloc_dma(),
+ *	- DBG() is for any errors, i.e. failed alloc_iob(), malloc_phys(),
  *	  TX overflow, corrupted packets, ...
  *	- DBG2() is for successful events, like packet received,
  *	  packet transmitted, and other general notifications.
@@ -335,7 +335,7 @@ static int ifec_net_open ( struct net_device *netdev )
 	ifec_mdio_setup ( netdev, options );
 
 	/* Prepare MAC address w/ Individual Address Setup (ias) command.*/
-	ias = malloc_dma ( sizeof ( *ias ), CB_ALIGN );
+	ias = malloc_phys ( sizeof ( *ias ), CB_ALIGN );
 	if ( !ias ) {
 		rc = -ENOMEM;
 		goto error;
@@ -345,7 +345,7 @@ static int ifec_net_open ( struct net_device *netdev )
 	memcpy ( ias->ia, netdev->ll_addr, ETH_ALEN );
 
 	/* Prepare operating parameters w/ a configure command. */
-	cfg = malloc_dma ( sizeof ( *cfg ), CB_ALIGN );
+	cfg = malloc_phys ( sizeof ( *cfg ), CB_ALIGN );
 	if ( !cfg ) {
 		rc = -ENOMEM;
 		goto error;
@@ -367,8 +367,8 @@ static int ifec_net_open ( struct net_device *netdev )
 		DBG ( "Failed to initiate!\n" );
 		goto error;
 	}
-	free_dma ( ias, sizeof ( *ias ) );
-	free_dma ( cfg, sizeof ( *cfg ) );
+	free_phys ( ias, sizeof ( *ias ) );
+	free_phys ( cfg, sizeof ( *cfg ) );
 	DBG2 ( "cfg " );
 
 	/* Enable rx by sending ring address to card */
@@ -381,8 +381,8 @@ static int ifec_net_open ( struct net_device *netdev )
 	return 0;
 
 error:
-	free_dma ( cfg, sizeof ( *cfg ) );
-	free_dma ( ias, sizeof ( *ias ) );
+	free_phys ( cfg, sizeof ( *cfg ) );
+	free_phys ( ias, sizeof ( *ias ) );
 	ifec_free ( netdev );
 	ifec_reset ( netdev );
 	return rc;
@@ -690,7 +690,7 @@ static void ifec_reset ( struct net_device *netdev )
  */
 static void ifec_free ( struct net_device *netdev )
 {
-	struct ifec_private *priv = netdev_priv ( netdev );
+	struct ifec_private *priv = netdev->priv;
 	int i;
 
 	DBGP ( "ifec_free\n" );
@@ -703,7 +703,7 @@ static void ifec_free ( struct net_device *netdev )
 	}
 
 	/* free TX ring buffer */
-	free_dma ( priv->tcbs, TX_RING_BYTES );
+	free_phys ( priv->tcbs, TX_RING_BYTES );
 
 	priv->tcbs = NULL;
 }
@@ -1025,7 +1025,7 @@ static int ifec_tx_setup ( struct net_device *netdev )
 	DBGP ( "ifec_tx_setup\n" );
 
 	/* allocate tx ring */
-	priv->tcbs = malloc_dma ( TX_RING_BYTES, CB_ALIGN );
+	priv->tcbs = malloc_phys ( TX_RING_BYTES, CB_ALIGN );
 	if ( !priv->tcbs ) {
 		DBG ( "TX-ring allocation failed\n" );
 		return -ENOMEM;
@@ -1126,8 +1126,12 @@ PCI_ROM(0x8086, 0x103b, "82562etb",      "Intel PRO100 VE 82562ETB", 0),
 PCI_ROM(0x8086, 0x103c, "eepro100-103c", "Intel PRO/100 VM Network Connection", 0),
 PCI_ROM(0x8086, 0x103d, "eepro100-103d", "Intel PRO/100 VE Network Connection", 0),
 PCI_ROM(0x8086, 0x103e, "eepro100-103e", "Intel PRO/100 VM Network Connection", 0),
+PCI_ROM(0x8086, 0x1050, "82562ez",       "Intel 82562EZ Network Connection", 0),
 PCI_ROM(0x8086, 0x1051, "prove",         "Intel PRO/100 VE Network Connection", 0),
 PCI_ROM(0x8086, 0x1059, "82551qm",       "Intel PRO/100 M Mobile Connection", 0),
+PCI_ROM(0x8086, 0x1065, "82562-3",       "Intel 82562 based Fast Ethernet Connection", 0),
+PCI_ROM(0x8086, 0x1092, "82562-3",       "Intel Pro/100 VE Network", 0),
+PCI_ROM(0x8086, 0x10fe, "82552",         "Intel 82552 10/100 Network Connection", 0),
 PCI_ROM(0x8086, 0x1209, "82559er",       "Intel EtherExpressPro100 82559ER", 0),
 PCI_ROM(0x8086, 0x1227, "82865",         "Intel 82865 EtherExpress PRO/100A", 0),
 PCI_ROM(0x8086, 0x1228, "82556",         "Intel 82556 EtherExpress PRO/100 Smart", 0),
@@ -1135,13 +1139,9 @@ PCI_ROM(0x8086, 0x1229, "eepro100",      "Intel EtherExpressPro100", 0),
 PCI_ROM(0x8086, 0x2449, "82562em",       "Intel EtherExpressPro100 82562EM", 0),
 PCI_ROM(0x8086, 0x2459, "82562-1",       "Intel 82562 based Fast Ethernet Connection", 0),
 PCI_ROM(0x8086, 0x245d, "82562-2",       "Intel 82562 based Fast Ethernet Connection", 0),
-PCI_ROM(0x8086, 0x1050, "82562ez",       "Intel 82562EZ Network Connection", 0),
-PCI_ROM(0x8086, 0x1065, "82562-3",       "Intel 82562 based Fast Ethernet Connection", 0),
+PCI_ROM(0x8086, 0x27dc, "eepro100-27dc", "Intel 82801G (ICH7) Chipset Ethernet Controller", 0),
 PCI_ROM(0x8086, 0x5200, "eepro100-5200", "Intel EtherExpress PRO/100 Intelligent Server", 0),
 PCI_ROM(0x8086, 0x5201, "eepro100-5201", "Intel EtherExpress PRO/100 Intelligent Server", 0),
-PCI_ROM(0x8086, 0x1092, "82562-3",       "Intel Pro/100 VE Network", 0),
-PCI_ROM(0x8086, 0x27dc, "eepro100-27dc", "Intel 82801G (ICH7) Chipset Ethernet Controller", 0),
-PCI_ROM(0x8086, 0x10fe, "82552",         "Intel 82552 10/100 Network Connection", 0),
 };
 
 /* Cards with device ids 0x1030 to 0x103F, 0x2449, 0x2459 or 0x245D might need

@@ -27,6 +27,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <errno.h>
 #include <assert.h>
 #include <libgen.h>
@@ -55,8 +56,15 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 /** List of registered images */
 struct list_head images = LIST_HEAD_INIT ( images );
 
+/** Image selected for execution */
+struct image_tag selected_image __image_tag = {
+	.name = "SELECTED",
+};
+
 /** Currently-executing image */
-struct image *current_image;
+struct image_tag current_image __image_tag = {
+	.name = "CURRENT",
+};
 
 /** Current image trust requirement */
 static int require_trusted_images = 0;
@@ -71,8 +79,13 @@ static int require_trusted_images_permanent = 0;
  */
 static void free_image ( struct refcnt *refcnt ) {
 	struct image *image = container_of ( refcnt, struct image, refcnt );
+	struct image_tag *tag;
 
 	DBGC ( image, "IMAGE %s freed\n", image->name );
+	for_each_table_entry ( tag, IMAGE_TAGS ) {
+		if ( tag->image == image )
+			tag->image = NULL;
+	}
 	free ( image->name );
 	free ( image->cmdline );
 	uri_put ( image->uri );
@@ -121,10 +134,13 @@ int image_set_uri ( struct image *image, struct uri *uri ) {
 	int rc;
 
 	/* Set name, if image does not already have one */
-	if ( uri->path && ( ! ( image->name && image->name[0] ) ) ) {
-		name = basename ( ( char * ) uri->path );
-		if ( ( rc = image_set_name ( image, name ) ) != 0 )
-			return rc;
+	if ( ! ( image->name && image->name[0] ) ) {
+		name = ( uri->path ? uri->path : uri->opaque );
+		if ( name ) {
+			name = basename ( ( char * ) name );
+			if ( ( rc = image_set_name ( image, name ) ) != 0 )
+				return rc;
+		}
 	}
 
 	/* Update image URI */
@@ -176,6 +192,47 @@ int image_set_cmdline ( struct image *image, const char *cmdline ) {
 }
 
 /**
+ * Set image length
+ *
+ * @v image		Image
+ * @v len		Length of image data
+ * @ret rc		Return status code
+ */
+int image_set_len ( struct image *image, size_t len ) {
+	userptr_t new;
+
+	/* (Re)allocate image data */
+	new = urealloc ( image->data, len );
+	if ( ! new )
+		return -ENOMEM;
+	image->data = new;
+	image->len = len;
+
+	return 0;
+}
+
+/**
+ * Set image data
+ *
+ * @v image		Image
+ * @v data		Image data
+ * @v len		Length of image data
+ * @ret rc		Return status code
+ */
+int image_set_data ( struct image *image, userptr_t data, size_t len ) {
+	int rc;
+
+	/* Set image length */
+	if ( ( rc = image_set_len ( image, len ) ) != 0 )
+		return rc;
+
+	/* Copy in new image data */
+	memcpy_user ( image->data, 0, data, 0, len );
+
+	return 0;
+}
+
+/**
  * Determine image type
  *
  * @v image		Executable image
@@ -218,12 +275,6 @@ int register_image ( struct image *image ) {
 		if ( ( rc = image_set_name ( image, name ) ) != 0 )
 			return rc;
 	}
-
-	/* Avoid ending up with multiple "selected" images on
-	 * re-registration
-	 */
-	if ( image_find_selected() )
-		image->flags &= ~IMAGE_SELECTED;
 
 	/* Add to image list */
 	image_get ( image );
@@ -270,8 +321,25 @@ void unregister_image ( struct image *image ) {
 struct image * find_image ( const char *name ) {
 	struct image *image;
 
-	list_for_each_entry ( image, &images, list ) {
+	for_each_image ( image ) {
 		if ( strcmp ( image->name, name ) == 0 )
+			return image;
+	}
+
+	return NULL;
+}
+
+/**
+ * Find image by tag
+ *
+ * @v tag		Image tag
+ * @ret image		Executable image, or NULL
+ */
+struct image * find_image_tag ( struct image_tag *tag ) {
+	struct image *image;
+
+	for_each_image ( image ) {
+		if ( tag->image == image )
 			return image;
 	}
 
@@ -297,18 +365,20 @@ int image_exec ( struct image *image ) {
 	/* Sanity check */
 	assert ( image->flags & IMAGE_REGISTERED );
 
-	/* Switch current working directory to be that of the image itself */
-	old_cwuri = uri_get ( cwuri );
-	churi ( image->uri );
-
-	/* Preserve record of any currently-running image */
-	saved_current_image = current_image;
-
-	/* Take out a temporary reference to the image.  This allows
-	 * the image to unregister itself if necessary, without
-	 * automatically freeing itself.
+	/* Switch current working directory to be that of the image
+	 * itself, if applicable
 	 */
-	current_image = image_get ( image );
+	old_cwuri = uri_get ( cwuri );
+	if ( image->uri )
+		churi ( image->uri );
+
+	/* Set as currently running image */
+	saved_current_image = image_tag ( image, &current_image );
+
+	/* Take out a temporary reference to the image, so that it
+	 * does not get freed when temporarily unregistered.
+	 */
+	image_get ( image );
 
 	/* Check that this image can be executed */
 	if ( ! ( image->type && image->type->exec ) ) {
@@ -326,6 +396,9 @@ int image_exec ( struct image *image ) {
 	/* Record boot attempt */
 	syslog ( LOG_NOTICE, "Executing \"%s\"\n", image->name );
 
+	/* Temporarily unregister the image during its execution */
+	unregister_image ( image );
+
 	/* Try executing the image */
 	if ( ( rc = image->type->exec ( image ) ) != 0 ) {
 		DBGC ( image, "IMAGE %s could not execute: %s\n",
@@ -341,6 +414,10 @@ int image_exec ( struct image *image ) {
 		syslog ( LOG_ERR, "Execution of \"%s\" failed: %s\n",
 			 image->name, strerror ( rc ) );
 	}
+
+	/* Re-register image (unless due to be replaced) */
+	if ( ! image->replacement )
+		register_image ( image );
 
 	/* Pick up replacement image before we drop the original
 	 * image's temporary reference.  The replacement image must
@@ -368,7 +445,7 @@ int image_exec ( struct image *image ) {
 	image_put ( image );
 
 	/* Restore previous currently-running image */
-	current_image = saved_current_image;
+	image_tag ( saved_current_image, &current_image );
 
 	/* Reset current working directory */
 	churi ( old_cwuri );
@@ -391,7 +468,7 @@ int image_exec ( struct image *image ) {
  * registered until the currently-executing image returns.
  */
 int image_replace ( struct image *replacement ) {
-	struct image *image = current_image;
+	struct image *image = current_image.image;
 	int rc;
 
 	/* Sanity check */
@@ -427,35 +504,15 @@ int image_replace ( struct image *replacement ) {
  * @ret rc		Return status code
  */
 int image_select ( struct image *image ) {
-	struct image *tmp;
-
-	/* Unselect all other images */
-	for_each_image ( tmp )
-		tmp->flags &= ~IMAGE_SELECTED;
 
 	/* Check that this image can be executed */
 	if ( ! ( image->type && image->type->exec ) )
 		return -ENOEXEC;
 
 	/* Mark image as selected */
-	image->flags |= IMAGE_SELECTED;
+	image_tag ( image, &selected_image );
 
 	return 0;
-}
-
-/**
- * Find selected image
- *
- * @ret image		Executable image, or NULL
- */
-struct image * image_find_selected ( void ) {
-	struct image *image;
-
-	for_each_image ( image ) {
-		if ( image->flags & IMAGE_SELECTED )
-			return image;
-	}
-	return NULL;
 }
 
 /**
@@ -480,4 +537,78 @@ int image_set_trust ( int require_trusted, int permanent ) {
 		return -EACCES_PERMANENT;
 
 	return 0;
+}
+
+/**
+ * Create registered image from block of memory
+ *
+ * @v name		Name
+ * @v data		Image data
+ * @v len		Length
+ * @ret image		Image, or NULL on error
+ */
+struct image * image_memory ( const char *name, userptr_t data, size_t len ) {
+	struct image *image;
+	int rc;
+
+	/* Allocate image */
+	image = alloc_image ( NULL );
+	if ( ! image ) {
+		rc = -ENOMEM;
+		goto err_alloc_image;
+	}
+
+	/* Set name */
+	if ( ( rc = image_set_name ( image, name ) ) != 0 )
+		goto err_set_name;
+
+	/* Set data */
+	if ( ( rc = image_set_data ( image, data, len ) ) != 0 )
+		goto err_set_data;
+
+	/* Register image */
+	if ( ( rc = register_image ( image ) ) != 0 )
+		goto err_register;
+
+	/* Drop local reference to image */
+	image_put ( image );
+
+	return image;
+
+ err_register:
+ err_set_data:
+ err_set_name:
+	image_put ( image );
+ err_alloc_image:
+	return NULL;
+}
+
+/**
+ * Find argument within image command line
+ *
+ * @v image		Image
+ * @v key		Argument search key (including trailing delimiter)
+ * @ret value		Argument value, or NULL if not found
+ */
+const char * image_argument ( struct image *image, const char *key ) {
+	const char *cmdline = image->cmdline;
+	const char *search;
+	const char *match;
+	const char *next;
+
+	/* Find argument */
+	for ( search = cmdline ; search ; search = next ) {
+
+		/* Find next occurrence, if any */
+		match = strstr ( search, key );
+		if ( ! match )
+			break;
+		next = ( match + strlen ( key ) );
+
+		/* Check preceding delimiter, if any */
+		if ( ( match == cmdline ) || isspace ( match[-1] ) )
+			return next;
+	}
+
+	return NULL;
 }

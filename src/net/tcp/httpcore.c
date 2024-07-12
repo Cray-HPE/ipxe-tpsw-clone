@@ -56,6 +56,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <ipxe/profile.h>
 #include <ipxe/vsprintf.h>
 #include <ipxe/errortab.h>
+#include <ipxe/efi/efi_path.h>
 #include <ipxe/http.h>
 
 /* Disambiguate the various error causes */
@@ -88,7 +89,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 	__einfo_uniqify ( EINFO_EIO, 0x05, "HTTP 5xx Server Error" )
 #define ENOENT_404 __einfo_error ( EINFO_ENOENT_404 )
 #define EINFO_ENOENT_404 \
-	__einfo_uniqify ( EINFO_ENOENT, 0x01, "HTTP 404 Not Found" )
+	__einfo_uniqify ( EINFO_ENOENT, 0x01, "Not found" )
 #define ENOTSUP_CONNECTION __einfo_error ( EINFO_ENOTSUP_CONNECTION )
 #define EINFO_ENOTSUP_CONNECTION \
 	__einfo_uniqify ( EINFO_ENOTSUP, 0x01, "Unsupported connection header" )
@@ -113,6 +114,7 @@ static struct profiler http_xfer_profiler __profiler = { .name = "http.xfer" };
 
 /** Human-readable error messages */
 struct errortab http_errors[] __errortab = {
+	__einfo_errortab ( EINFO_ENOENT_404 ),
 	__einfo_errortab ( EINFO_EIO_4XX ),
 	__einfo_errortab ( EINFO_EIO_5XX ),
 };
@@ -121,10 +123,6 @@ static struct http_state http_request;
 static struct http_state http_headers;
 static struct http_state http_trailers;
 static struct http_transfer_encoding http_transfer_identity;
-
-#ifdef HTTP_AUTH_BEARER
-static int http_redirect_request = 0;
-#endif
 
 /******************************************************************************
  *
@@ -523,6 +521,18 @@ __weak int http_block_read_capacity ( struct http_transaction *http __unused,
 	return -ENOTSUP;
 }
 
+/**
+ * Describe as an EFI device path
+ *
+ * @v http		HTTP transaction
+ * @ret path		EFI device path, or NULL on error
+ */
+static EFI_DEVICE_PATH_PROTOCOL *
+http_efi_describe ( struct http_transaction *http ) {
+
+	return efi_uri_path ( http->uri );
+}
+
 /** HTTP data transfer interface operations */
 static struct interface_operation http_xfer_operations[] = {
 	INTF_OP ( block_read, struct http_transaction *, http_block_read ),
@@ -530,6 +540,8 @@ static struct interface_operation http_xfer_operations[] = {
 		  http_block_read_capacity ),
 	INTF_OP ( xfer_window_changed, struct http_transaction *, http_step ),
 	INTF_OP ( intf_close, struct http_transaction *, http_close ),
+	EFI_INTF_OP ( efi_describe, struct http_transaction *,
+		      http_efi_describe ),
 };
 
 /** HTTP data transfer interface descriptor */
@@ -603,8 +615,8 @@ int http_open ( struct interface *xfer, struct http_method *method,
 
 	/* Calculate request URI length */
 	memset ( &request_uri, 0, sizeof ( request_uri ) );
-	request_uri.path = ( uri->path ? uri->path : "/" );
-	request_uri.query = uri->query;
+	request_uri.epath = ( uri->epath ? uri->epath : "/" );
+	request_uri.equery = uri->equery;
 	request_uri_len =
 		( format_uri ( &request_uri, NULL, 0 ) + 1 /* NUL */);
 
@@ -689,10 +701,6 @@ static int http_redirect ( struct http_transaction *http,
 	int rc;
 
 	DBGC2 ( http, "HTTP %p redirecting to \"%s\"\n", http, location );
-#ifdef HTTP_AUTH_BEARER
-	http_redirect_request=1;
-#endif
-
 
 	/* Parse location URI */
 	location_uri = parse_uri ( location );
@@ -823,17 +831,14 @@ static int http_transfer_complete ( struct http_transaction *http ) {
  */
 static int http_format_headers ( struct http_transaction *http, char *buf,
 				 size_t len ) {
+	struct parameters *params = http->uri->params;
 	struct http_request_header *header;
+	struct parameter *param;
 	size_t used;
 	size_t remaining;
 	char *line;
 	int value_len;
 	int rc;
-
-	/* Host and path debug info */
-	DBGC2 ( http, "HTTP http_format_headers %p TX request host: %s\n", http, http->uri->host );
-	DBGC2 ( http, "HTTP http_format_headers %p TX request path: %s\n", http, http->uri->path );
-	DBGC2 ( http, "HTTP http_format_headers %p TX S3_HOST: %s\n", http, S3_HOST );
 
 	/* Construct request line */
 	used = ssnprintf ( buf, len, "%s %s HTTP/1.1",
@@ -842,7 +847,7 @@ static int http_format_headers ( struct http_transaction *http, char *buf,
 		DBGC2 ( http, "HTTP %p TX %s\n", http, buf );
 	used += ssnprintf ( ( buf + used ), ( len - used ), "\r\n" );
 
-	/* Construct all headers */
+	/* Construct all fixed headers */
 	for_each_table_entry ( header, HTTP_REQUEST_HEADERS ) {
 
 		/* Determine header value length */
@@ -856,17 +861,6 @@ static int http_format_headers ( struct http_transaction *http, char *buf,
 		if ( ! value_len )
 			continue;
 
-#ifdef HTTP_AUTH_BEARER
-		/* Skip Authorization header on a redirect or if going directly to S3 */
-		if ( http_redirect_request == 1 || strcmp( S3_HOST, http->uri->host ) == 0 ) {
-			if ( ! strcmp("Authorization",header->name) ) {
-				DBGC2 ( http, "HTTP %p TX not including header: %s\n", http, header->name );
-				continue;
-			}
-		}
-#endif
-
-
 		/* Construct header */
 		line = ( buf + used );
 		used += ssnprintf ( ( buf + used ), ( len - used ), "%s: ",
@@ -876,6 +870,23 @@ static int http_format_headers ( struct http_transaction *http, char *buf,
 		if ( used < len )
 			DBGC2 ( http, "HTTP %p TX %s\n", http, line );
 		used += ssnprintf ( ( buf + used ), ( len - used ), "\r\n" );
+	}
+
+	/* Construct parameter headers, if any */
+	if ( params ) {
+
+		/* Construct all parameter headers */
+		for_each_param ( param, params ) {
+
+			/* Skip non-header parameters */
+			if ( ! ( param->flags & PARAMETER_HEADER ) )
+				continue;
+
+			/* Add parameter */
+			used += ssnprintf ( ( buf + used ), ( len - used ),
+					    "%s: %s\r\n", param->key,
+					    param->value );
+		}
 	}
 
 	/* Construct terminating newline */
@@ -1091,13 +1102,6 @@ static int http_tx_request ( struct http_transaction *http ) {
 	assert ( check_len == len );
 	memcpy ( iob_put ( iobuf, http->request.content.len ),
 		 http->request.content.data, http->request.content.len );
-
-#ifdef HTTP_AUTH_BEARER
-	/* Were done processing headers so reset the flag */
-	if ( http_redirect_request == 1 ) {
-		http_redirect_request=0;
-	}
-#endif
 
 	/* Deliver request */
 	if ( ( rc = xfer_deliver_iob ( &http->conn,
@@ -1867,14 +1871,15 @@ static struct http_state http_trailers = {
  */
 
 /**
- * Construct HTTP parameter list
+ * Construct HTTP form parameter list
  *
  * @v params		Parameter list
  * @v buf		Buffer to contain HTTP POST parameters
  * @v len		Length of buffer
  * @ret len		Length of parameter list (excluding terminating NUL)
  */
-static size_t http_params ( struct parameters *params, char *buf, size_t len ) {
+static size_t http_form_params ( struct parameters *params, char *buf,
+				 size_t len ) {
 	struct parameter *param;
 	ssize_t remaining = len;
 	size_t frag_len;
@@ -1882,6 +1887,10 @@ static size_t http_params ( struct parameters *params, char *buf, size_t len ) {
 	/* Add each parameter in the form "key=value", joined with "&" */
 	len = 0;
 	for_each_param ( param, params ) {
+
+		/* Skip non-form parameters */
+		if ( ! ( param->flags & PARAMETER_FORM ) )
+			continue;
 
 		/* Add the "&", if applicable */
 		if ( len ) {
@@ -1920,62 +1929,6 @@ static size_t http_params ( struct parameters *params, char *buf, size_t len ) {
 }
 
 /**
- * Open HTTP transaction for simple GET URI
- *
- * @v xfer		Data transfer interface
- * @v uri		Request URI
- * @ret rc		Return status code
- */
-static int http_open_get_uri ( struct interface *xfer, struct uri *uri ) {
-
-	return http_open ( xfer, &http_get, uri, NULL, NULL );
-}
-
-/**
- * Open HTTP transaction for simple POST URI
- *
- * @v xfer		Data transfer interface
- * @v uri		Request URI
- * @ret rc		Return status code
- */
-static int http_open_post_uri ( struct interface *xfer, struct uri *uri ) {
-	struct parameters *params = uri->params;
-	struct http_request_content content;
-	void *data;
-	size_t len;
-	size_t check_len;
-	int rc;
-
-	/* Calculate length of parameter list */
-	len = http_params ( params, NULL, 0 );
-
-	/* Allocate temporary parameter list */
-	data = zalloc ( len + 1 /* NUL */ );
-	if ( ! data ) {
-		rc = -ENOMEM;
-		goto err_alloc;
-	}
-
-	/* Construct temporary parameter list */
-	check_len = http_params ( params, data, ( len + 1 /* NUL */ ) );
-	assert ( check_len == len );
-
-	/* Construct request content */
-	content.type = "application/x-www-form-urlencoded";
-	content.data = data;
-	content.len = len;
-
-	/* Open HTTP transaction */
-	if ( ( rc = http_open ( xfer, &http_post, uri, NULL, &content ) ) != 0 )
-		goto err_open;
-
- err_open:
-	free ( data );
- err_alloc:
-	return rc;
-}
-
-/**
  * Open HTTP transaction for simple URI
  *
  * @v xfer		Data transfer interface
@@ -1983,37 +1936,59 @@ static int http_open_post_uri ( struct interface *xfer, struct uri *uri ) {
  * @ret rc		Return status code
  */
 int http_open_uri ( struct interface *xfer, struct uri *uri ) {
+	struct parameters *params = uri->params;
+	struct http_request_content content;
+	struct http_method *method;
+	const char *type;
+	void *data;
+	size_t len;
+	size_t check_len;
+	int rc;
 
-	/* Open GET/POST URI as applicable */
-	if ( uri->params ) {
-		return http_open_post_uri ( xfer, uri );
+	/* Calculate length of form parameter list, if any */
+	len = ( params ? http_form_params ( params, NULL, 0 ) : 0 );
+
+	/* Use POST if and only if there are form parameters */
+	if ( len ) {
+
+		/* Use POST */
+		method = &http_post;
+		type = "application/x-www-form-urlencoded";
+
+		/* Allocate temporary form parameter list */
+		data = zalloc ( len + 1 /* NUL */ );
+		if ( ! data ) {
+			rc = -ENOMEM;
+			goto err_alloc;
+		}
+
+		/* Construct temporary form parameter list */
+		check_len = http_form_params ( params, data,
+					       ( len + 1 /* NUL */ ) );
+		assert ( check_len == len );
+
 	} else {
-		return http_open_get_uri ( xfer, uri );
+
+		/* Use GET */
+		method = &http_get;
+		type = NULL;
+		data = NULL;
 	}
+
+	/* Construct request content */
+	content.type = type;
+	content.data = data;
+	content.len = len;
+
+	/* Open HTTP transaction */
+	if ( ( rc = http_open ( xfer, method, uri, NULL, &content ) ) != 0 )
+		goto err_open;
+
+ err_open:
+	free ( data );
+ err_alloc:
+	return rc;
 }
-
-#ifdef HTTP_AUTH_BEARER
-/**
- * Construct HTTP "Authorization: Bearer token" header
- *
- * @v http		HTTP transaction
- * @v buf		Buffer
- * @v len		Length of buffer
- * @ret len		Length of header value, or negative error
- */
-static int http_format_authorization_bearer ( struct http_transaction *http __unused,
-				    char *buf, size_t len ) {
-
-	/* Construct bearer token */
-	return snprintf ( buf, len, "Bearer %s",  HTTP_AUTH_BEARER_TOKEN );
-}
-
-/** HTTP "Authorization: Bearer" header */
-struct http_request_header http_request_authorization_bearer __http_request_header = {
-	.name = "Authorization",
-	.format = http_format_authorization_bearer,
-};
-#endif // HTTP_AUTH_BEARER
 
 /* Drag in HTTP extensions */
 REQUIRING_SYMBOL ( http_open );

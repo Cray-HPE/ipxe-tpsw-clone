@@ -14,6 +14,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <realmode.h>
 #include <pic8259.h>
 #include <ipxe/shell.h>
+#include <ipxe/cpuid.h>
 
 /*
  * This file provides functions for managing librm.
@@ -43,6 +44,9 @@ idt64[NUM_INT] __attribute__ (( aligned ( 16 ) ));
 struct idtr64 idtr64 = {
 	.limit = ( sizeof ( idt64 ) - 1 ),
 };
+
+/** Startup IPI register state */
+struct i386_regs sipi_regs;
 
 /** Length of stack dump */
 #define STACK_DUMP_LEN 128
@@ -118,7 +122,7 @@ void set_interrupt_vector ( unsigned int intr, void *vector ) {
  * Initialise interrupt descriptor table
  *
  */
-void init_idt ( void ) {
+__asmcall void init_idt ( void ) {
 	struct interrupt_vector *vec;
 	unsigned int intr;
 
@@ -384,6 +388,44 @@ static void iounmap_pages ( volatile const void *io_addr ) {
 
 	DBGC ( &io_pages, "IO unmapped %p using PTEs [%d-%d]\n",
 	       io_addr, first, i );
+}
+
+/**
+ * Check for FXSAVE/FXRSTOR instruction support
+ *
+ */
+__asmcall void check_fxsr ( struct i386_all_regs *regs ) {
+	struct x86_features features;
+
+	/* Check for FXSR bit */
+	x86_features ( &features );
+	if ( ! ( features.intel.edx & CPUID_FEATURES_INTEL_EDX_FXSR ) )
+		regs->flags |= CF;
+	DBGC ( &features, "FXSAVE/FXRSTOR is%s supported\n",
+	       ( ( regs->flags & CF ) ? " not" : "" ) );
+}
+
+/**
+ * Set up startup IPI handler
+ *
+ * @v vector		Startup IPI vector
+ * @v handler		Protected-mode startup IPI handler physical address
+ * @v regs		Initial register state
+ */
+void setup_sipi ( unsigned int vector, uint32_t handler,
+		  struct i386_regs *regs ) {
+
+	/* Record protected-mode handler */
+	sipi_handler = handler;
+
+	/* Update copy of rm_ds */
+	sipi_ds = rm_ds;
+
+	/* Save register state */
+	memcpy ( &sipi_regs, regs, sizeof ( sipi_regs ) );
+
+	/* Copy real-mode handler */
+	copy_to_real ( ( vector << 8 ), 0, sipi, ( ( size_t ) sipi_len ) );
 }
 
 PROVIDE_UACCESS_INLINE ( librm, phys_to_user );

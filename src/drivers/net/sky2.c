@@ -81,8 +81,8 @@ FILE_LICENCE ( GPL2_ONLY );
 static struct pci_device_id sky2_id_table[] = {
 	PCI_ROM(0x1148, 0x9000, "sk9sxx", "Syskonnect SK-9Sxx", 0),
 	PCI_ROM(0x1148, 0x9e00, "sk9exx", "Syskonnect SK-9Exx", 0),
-	PCI_ROM(0x1186, 0x4b00, "dge560t", "D-Link DGE-560T", 0),
 	PCI_ROM(0x1186, 0x4001, "dge550sx", "D-Link DGE-550SX", 0),
+	PCI_ROM(0x1186, 0x4b00, "dge560t", "D-Link DGE-560T", 0),
 	PCI_ROM(0x1186, 0x4b02, "dge560sx", "D-Link DGE-560SX", 0),
 	PCI_ROM(0x1186, 0x4b03, "dge550t", "D-Link DGE-550T", 0),
 	PCI_ROM(0x11ab, 0x4340, "m88e8021", "Marvell 88E8021", 0),
@@ -296,7 +296,7 @@ static const u16 gm_fc_disable[] = {
 
 static void sky2_phy_init(struct sky2_hw *hw, unsigned port)
 {
-	struct sky2_port *sky2 = netdev_priv(hw->dev[port]);
+	struct sky2_port *sky2 = hw->dev[port]->priv;
 	u16 ctrl, ct1000, adv, pg, ledctrl, ledover, reg;
 
 	if (sky2->autoneg == AUTONEG_ENABLE &&
@@ -1112,10 +1112,10 @@ nomem:
 /* Free the le and ring buffers */
 static void sky2_free_rings(struct sky2_port *sky2)
 {
-	free_dma(sky2->rx_le, RX_LE_BYTES);
+	free_phys(sky2->rx_le, RX_LE_BYTES);
 	free(sky2->rx_ring);
 
-	free_dma(sky2->tx_le, TX_RING_SIZE * sizeof(struct sky2_tx_le));
+	free_phys(sky2->tx_le, TX_RING_SIZE * sizeof(struct sky2_tx_le));
 	free(sky2->tx_ring);
 
 	sky2->tx_le = NULL;
@@ -1128,7 +1128,7 @@ static void sky2_free_rings(struct sky2_port *sky2)
 /* Bring up network interface. */
 static int sky2_up(struct net_device *dev)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct sky2_hw *hw = sky2->hw;
 	unsigned port = sky2->port;
 	u32 imask, ramsize;
@@ -1137,7 +1137,7 @@ static int sky2_up(struct net_device *dev)
 	netdev_link_down(dev);
 
 	/* must be power of 2 */
-	sky2->tx_le = malloc_dma(TX_RING_SIZE * sizeof(struct sky2_tx_le), TX_RING_ALIGN);
+	sky2->tx_le = malloc_phys(TX_RING_SIZE * sizeof(struct sky2_tx_le), TX_RING_ALIGN);
 	sky2->tx_le_map = virt_to_bus(sky2->tx_le);
 	if (!sky2->tx_le)
 		goto err_out;
@@ -1149,7 +1149,7 @@ static int sky2_up(struct net_device *dev)
 
 	tx_init(sky2);
 
-	sky2->rx_le = malloc_dma(RX_LE_BYTES, RX_RING_ALIGN);
+	sky2->rx_le = malloc_phys(RX_LE_BYTES, RX_RING_ALIGN);
 	sky2->rx_le_map = virt_to_bus(sky2->rx_le);
 	if (!sky2->rx_le)
 		goto err_out;
@@ -1237,7 +1237,7 @@ static inline int tx_avail(const struct sky2_port *sky2)
  */
 static int sky2_xmit_frame(struct net_device *dev, struct io_buffer *iob)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct sky2_hw *hw = sky2->hw;
 	struct sky2_tx_le *le = NULL;
 	struct tx_ring_info *re;
@@ -1303,7 +1303,7 @@ static void sky2_tx_complete(struct sky2_port *sky2, u16 done)
 /* Cleanup all untransmitted buffers, assume transmitter not running */
 static void sky2_tx_clean(struct net_device *dev)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 
 	sky2_tx_complete(sky2, sky2->tx_prod);
 }
@@ -1311,7 +1311,7 @@ static void sky2_tx_clean(struct net_device *dev)
 /* Network shutdown */
 static void sky2_down(struct net_device *dev)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct sky2_hw *hw = sky2->hw;
 	unsigned port = sky2->port;
 	u16 ctrl;
@@ -1511,7 +1511,7 @@ static int sky2_autoneg_done(struct sky2_port *sky2, u16 aux)
 static void sky2_phy_intr(struct sky2_hw *hw, unsigned port)
 {
 	struct net_device *dev = hw->dev[port];
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	u16 istatus, phystat;
 
 	istatus = gm_phy_read(hw, port, PHY_MARV_INT_STAT);
@@ -1570,7 +1570,7 @@ static struct io_buffer *receive_new(struct sky2_port *sky2,
 static struct io_buffer *sky2_receive(struct net_device *dev,
 				      u16 length, u32 status)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct rx_ring_info *re = sky2->rx_ring + sky2->rx_next;
 	struct io_buffer *iob = NULL;
 	u16 count = (status & GMR_FS_LEN) >> 16;
@@ -1634,7 +1634,7 @@ error:
 /* Transmit complete */
 static inline void sky2_tx_done(struct net_device *dev, u16 last)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 
 	sky2_tx_complete(sky2, last);
 }
@@ -1700,10 +1700,10 @@ static void sky2_status_intr(struct sky2_hw *hw, u16 idx)
 	sky2_write32(hw, STAT_CTRL, SC_STAT_CLR_IRQ);
 
 	if (rx[0])
-		sky2_rx_update(netdev_priv(hw->dev[0]), Q_R1);
+		sky2_rx_update(hw->dev[0]->priv, Q_R1);
 
 	if (rx[1])
-		sky2_rx_update(netdev_priv(hw->dev[1]), Q_R2);
+		sky2_rx_update(hw->dev[1]->priv, Q_R2);
 }
 
 static void sky2_hw_error(struct sky2_hw *hw, unsigned port, u32 status)
@@ -1809,7 +1809,7 @@ static void sky2_le_error(struct sky2_hw *hw, unsigned port,
 			  u16 q, unsigned ring_size __unused)
 {
 	struct net_device *dev = hw->dev[port];
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	int idx;
 	const u64 *le = (q == Q_R1 || q == Q_R2)
 		? (u64 *) sky2->rx_le : (u64 *) sky2->tx_le;
@@ -1853,7 +1853,7 @@ static void sky2_err_intr(struct sky2_hw *hw, u32 status)
 
 static void sky2_poll(struct net_device *dev)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct sky2_hw *hw = sky2->hw;
 	u32 status = sky2_read32(hw, B0_Y2_SP_EISR);
 	u16 idx;
@@ -2152,7 +2152,7 @@ static u32 sky2_supported_modes(const struct sky2_hw *hw)
 
 static void sky2_set_multicast(struct net_device *dev)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct sky2_hw *hw = sky2->hw;
 	unsigned port = sky2->port;
 	u16 reg;
@@ -2189,7 +2189,7 @@ static struct net_device *sky2_init_netdev(struct sky2_hw *hw,
 
 	dev->dev = &hw->pdev->dev;
 
-	sky2 = netdev_priv(dev);
+	sky2 = dev->priv;
 	sky2->netdev = dev;
 	sky2->hw = hw;
 
@@ -2241,7 +2241,7 @@ static const char *sky2_name(u8 chipid, char *buf, int sz)
 
 static void sky2_net_irq(struct net_device *dev, int enable)
 {
-	struct sky2_port *sky2 = netdev_priv(dev);
+	struct sky2_port *sky2 = dev->priv;
 	struct sky2_hw *hw = sky2->hw;
 
 	u32 imask = sky2_read32(hw, B0_IMSK);
@@ -2278,14 +2278,14 @@ static int sky2_probe(struct pci_device *pdev)
 
 	hw->pdev = pdev;
 
-	hw->regs = (unsigned long)ioremap(pci_bar_start(pdev, PCI_BASE_ADDRESS_0), 0x4000);
+	hw->regs = (unsigned long)pci_ioremap(pdev, pci_bar_start(pdev, PCI_BASE_ADDRESS_0), 0x4000);
 	if (!hw->regs) {
 		DBG(PFX "cannot map device registers\n");
 		goto err_out_free_hw;
 	}
 
 	/* ring for status responses */
-	hw->st_le = malloc_dma(STATUS_LE_BYTES, STATUS_RING_ALIGN);
+	hw->st_le = malloc_phys(STATUS_LE_BYTES, STATUS_RING_ALIGN);
 	if (!hw->st_le)
 		goto err_out_iounmap;
 	hw->st_dma = virt_to_bus(hw->st_le);
@@ -2344,7 +2344,7 @@ err_out_free_netdev:
 	netdev_put(dev);
 err_out_free_pci:
 	sky2_write8(hw, B0_CTST, CS_RST_SET);
-	free_dma(hw->st_le, STATUS_LE_BYTES);
+	free_phys(hw->st_le, STATUS_LE_BYTES);
 err_out_iounmap:
 	iounmap((void *)hw->regs);
 err_out_free_hw:
@@ -2373,7 +2373,7 @@ static void sky2_remove(struct pci_device *pdev)
 	sky2_write8(hw, B0_CTST, CS_RST_SET);
 	sky2_read8(hw, B0_CTST);
 
-	free_dma(hw->st_le, STATUS_LE_BYTES);
+	free_phys(hw->st_le, STATUS_LE_BYTES);
 
 	for (i = hw->ports-1; i >= 0; --i) {
 		netdev_nullify(hw->dev[i]);

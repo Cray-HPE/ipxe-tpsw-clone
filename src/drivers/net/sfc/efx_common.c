@@ -2,11 +2,12 @@
  *
  * Driver datapath common code for Solarflare network cards
  *
- * Written by Shradha Shah <sshah@solarflare.com>
+ * Written by Shradha Shah, maintained by <pre-boot-drivers@xilinx.com>
  *
  * Copyright Fen Systems Ltd. 2005
  * Copyright Level 5 Networks Inc. 2005
- * Copyright 2006-2017 Solarflare Communications Inc.
+ * Copyright 2006-2019 Solarflare Communications Inc.
+ * Copyright 2019-2020 Xilinx Inc.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -69,7 +70,7 @@ efx_readl(struct efx_nic *efx, efx_dword_t *value, unsigned int reg)
  ******************************************************************************/
 void efx_probe(struct net_device *netdev, enum efx_revision revision)
 {
-	struct efx_nic *efx = netdev_priv(netdev);
+	struct efx_nic *efx = netdev->priv;
 	struct pci_device *pci = container_of(netdev->dev,
 					      struct pci_device, dev);
 	unsigned int reg = PCI_BASE_ADDRESS_0;
@@ -85,7 +86,7 @@ void efx_probe(struct net_device *netdev, enum efx_revision revision)
 
 	efx->mmio_start = pci_bar_start(pci, reg);
 	efx->mmio_len = pci_bar_size(pci, reg);
-	efx->membase = ioremap(efx->mmio_start, efx->mmio_len);
+	efx->membase = pci_ioremap(pci, efx->mmio_start, efx->mmio_len);
 
 	DBGCP(efx, "BAR of %lx bytes at phys %lx mapped at %p\n",
 	      efx->mmio_len, efx->mmio_start, efx->membase);
@@ -96,7 +97,7 @@ void efx_probe(struct net_device *netdev, enum efx_revision revision)
 
 void efx_remove(struct net_device *netdev)
 {
-	struct efx_nic *efx = netdev_priv(netdev);
+	struct efx_nic *efx = netdev->priv;
 
 	iounmap(efx->membase);
 	efx->membase = NULL;

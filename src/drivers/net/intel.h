@@ -12,6 +12,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <stdint.h>
 #include <ipxe/if_ether.h>
 #include <ipxe/nvs.h>
+#include <ipxe/dma.h>
 
 /** Intel BAR size */
 #define INTEL_BAR_SIZE ( 128 * 1024 )
@@ -137,6 +138,10 @@ struct intel_descriptor {
 /** Packet Buffer Size */
 #define INTEL_PBS 0x01008UL
 
+/** Receive packet buffer size */
+#define INTEL_RXPBS 0x02404UL
+#define INTEL_RXPBS_I210	0x000000a2UL	/**< I210 power-up default */
+
 /** Receive Descriptor register block */
 #define INTEL_RD 0x02800UL
 
@@ -152,6 +157,10 @@ struct intel_descriptor {
 
 /** Receive buffer length */
 #define INTEL_RX_MAX_LEN 2048
+
+/** Transmit packet buffer size */
+#define INTEL_TXPBS 0x03404UL
+#define INTEL_TXPBS_I210	0x04000014UL	/**< I210 power-up default */
 
 /** Transmit Descriptor register block */
 #define INTEL_TD 0x03800UL
@@ -212,6 +221,8 @@ union intel_receive_address {
 struct intel_ring {
 	/** Descriptors */
 	struct intel_descriptor *desc;
+	/** Descriptor ring DMA mapping */
+	struct dma_mapping map;
 	/** Producer index */
 	unsigned int prod;
 	/** Consumer index */
@@ -277,6 +288,8 @@ intel_init_mbox ( struct intel_mailbox *mbox, unsigned int ctrl,
 struct intel_nic {
 	/** Registers */
 	void *regs;
+	/** DMA device */
+	struct dma_device *dma;
 	/** Port number (for multi-port devices) */
 	unsigned int port;
 	/** Flags */
@@ -314,6 +327,8 @@ enum intel_flags {
 	INTEL_NO_ASDE = 0x0008,
 	/** Reset may cause a complete device hang */
 	INTEL_RST_HANG = 0x0010,
+	/** PBSIZE registers must be explicitly reset */
+	INTEL_PBSIZE_RST = 0x0020,
 };
 
 /** The i219 has a seriously broken reset mechanism */

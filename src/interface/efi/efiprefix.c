@@ -22,12 +22,17 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <stdlib.h>
 #include <errno.h>
 #include <ipxe/device.h>
+#include <ipxe/uri.h>
+#include <ipxe/init.h>
 #include <ipxe/efi/efi.h>
 #include <ipxe/efi/efi_driver.h>
 #include <ipxe/efi/efi_snp.h>
 #include <ipxe/efi/efi_autoboot.h>
+#include <ipxe/efi/efi_autoexec.h>
+#include <ipxe/efi/efi_cachedhcp.h>
 #include <ipxe/efi/efi_watchdog.h>
-#include <ipxe/efi/efi_blacklist.h>
+#include <ipxe/efi/efi_path.h>
+#include <ipxe/efi/efi_veto.h>
 
 /**
  * EFI entry point
@@ -47,9 +52,6 @@ EFI_STATUS EFIAPI _efi_start ( EFI_HANDLE image_handle,
 	/* Initialise EFI environment */
 	if ( ( efirc = efi_init ( image_handle, systab ) ) != 0 )
 		goto err_init;
-
-	/* Record autoboot device (if any) */
-	efi_set_autoboot();
 
 	/* Claim SNP devices for use by iPXE */
 	efi_snp_claim();
@@ -73,14 +75,44 @@ EFI_STATUS EFIAPI _efi_start ( EFI_HANDLE image_handle,
 }
 
 /**
+ * Initialise EFI application
+ *
+ */
+static void efi_init_application ( void ) {
+	EFI_HANDLE device = efi_loaded_image->DeviceHandle;
+	EFI_DEVICE_PATH_PROTOCOL *devpath = efi_loaded_image_path;
+	struct uri *uri;
+
+	/* Set current working URI from device path, if present */
+	uri = efi_path_uri ( devpath );
+	if ( uri )
+		churi ( uri );
+	uri_put ( uri );
+
+	/* Identify autoboot device, if any */
+	efi_set_autoboot_ll_addr ( device, devpath );
+
+	/* Store cached DHCP packet, if any */
+	efi_cachedhcp_record ( device, devpath );
+}
+
+/** EFI application initialisation function */
+struct init_fn efi_init_application_fn __init_fn ( INIT_NORMAL ) = {
+	.initialise = efi_init_application,
+};
+
+/**
  * Probe EFI root bus
  *
  * @v rootdev		EFI root device
  */
 static int efi_probe ( struct root_device *rootdev __unused ) {
 
-	/* Unloaded any blacklisted drivers */
-	efi_unload_blacklist();
+	/* Try loading autoexec script */
+	efi_autoexec_load();
+
+	/* Remove any vetoed drivers */
+	efi_veto();
 
 	/* Connect our drivers */
 	return efi_driver_connect_all();

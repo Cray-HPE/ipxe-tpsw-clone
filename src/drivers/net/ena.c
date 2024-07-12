@@ -24,6 +24,7 @@
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -34,6 +35,8 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <ipxe/iobuf.h>
 #include <ipxe/malloc.h>
 #include <ipxe/pci.h>
+#include <ipxe/pcibridge.h>
+#include <ipxe/version.h>
 #include "ena.h"
 
 /** @file
@@ -65,33 +68,57 @@ static const char * ena_direction ( unsigned int direction ) {
  */
 
 /**
- * Reset hardware
+ * Wait for reset operation to be acknowledged
  *
  * @v ena		ENA device
+ * @v expected		Expected reset state
  * @ret rc		Return status code
  */
-static int ena_reset ( struct ena_nic *ena ) {
+static int ena_reset_wait ( struct ena_nic *ena, uint32_t expected ) {
 	uint32_t stat;
 	unsigned int i;
-
-	/* Trigger reset */
-	writel ( ENA_CTRL_RESET, ( ena->regs + ENA_CTRL ) );
 
 	/* Wait for reset to complete */
 	for ( i = 0 ; i < ENA_RESET_MAX_WAIT_MS ; i++ ) {
 
 		/* Check if device is ready */
 		stat = readl ( ena->regs + ENA_STAT );
-		if ( stat & ENA_STAT_READY )
+		if ( ( stat & ENA_STAT_RESET ) == expected )
 			return 0;
 
 		/* Delay */
 		mdelay ( 1 );
 	}
 
-	DBGC ( ena, "ENA %p timed out waiting for reset (status %#08x)\n",
-	       ena, stat );
+	DBGC ( ena, "ENA %p timed out waiting for reset status %#08x "
+	       "(got %#08x)\n", ena, expected, stat );
 	return -ETIMEDOUT;
+}
+
+/**
+ * Reset hardware
+ *
+ * @v ena		ENA device
+ * @ret rc		Return status code
+ */
+static int ena_reset ( struct ena_nic *ena ) {
+	int rc;
+
+	/* Trigger reset */
+	writel ( ENA_CTRL_RESET, ( ena->regs + ENA_CTRL ) );
+
+	/* Wait for reset to take effect */
+	if ( ( rc = ena_reset_wait ( ena, ENA_STAT_RESET ) ) != 0 )
+		return rc;
+
+	/* Clear reset */
+	writel ( 0, ( ena->regs + ENA_CTRL ) );
+
+	/* Wait for reset to clear */
+	if ( ( rc = ena_reset_wait ( ena, 0 ) ) != 0 )
+		return rc;
+
+	return 0;
 }
 
 /******************************************************************************
@@ -164,7 +191,7 @@ static int ena_create_admin ( struct ena_nic *ena ) {
 	int rc;
 
 	/* Allocate admin completion queue */
-	ena->acq.rsp = malloc_dma ( acq_len, acq_len );
+	ena->acq.rsp = malloc_phys ( acq_len, acq_len );
 	if ( ! ena->acq.rsp ) {
 		rc = -ENOMEM;
 		goto err_alloc_acq;
@@ -172,7 +199,7 @@ static int ena_create_admin ( struct ena_nic *ena ) {
 	memset ( ena->acq.rsp, 0, acq_len );
 
 	/* Allocate admin queue */
-	ena->aq.req = malloc_dma ( aq_len, aq_len );
+	ena->aq.req = malloc_phys ( aq_len, aq_len );
 	if ( ! ena->aq.req ) {
 		rc = -ENOMEM;
 		goto err_alloc_aq;
@@ -196,9 +223,9 @@ static int ena_create_admin ( struct ena_nic *ena ) {
 
 	ena_clear_caps ( ena, ENA_AQ_CAPS );
 	ena_clear_caps ( ena, ENA_ACQ_CAPS );
-	free_dma ( ena->aq.req, aq_len );
+	free_phys ( ena->aq.req, aq_len );
  err_alloc_aq:
-	free_dma ( ena->acq.rsp, acq_len );
+	free_phys ( ena->acq.rsp, acq_len );
  err_alloc_acq:
 	return rc;
 }
@@ -218,8 +245,8 @@ static void ena_destroy_admin ( struct ena_nic *ena ) {
 	wmb();
 
 	/* Free queues */
-	free_dma ( ena->aq.req, aq_len );
-	free_dma ( ena->acq.rsp, acq_len );
+	free_phys ( ena->aq.req, aq_len );
+	free_phys ( ena->acq.rsp, acq_len );
 	DBGC ( ena, "ENA %p AQ and ACQ destroyed\n", ena );
 }
 
@@ -324,6 +351,90 @@ static int ena_admin ( struct ena_nic *ena, union ena_aq_req *req,
 }
 
 /**
+ * Set async event notification queue config
+ *
+ * @v ena		ENA device
+ * @v enabled		Bitmask of the groups to enable
+ * @ret rc		Return status code
+ */
+static int ena_set_aenq_config ( struct ena_nic *ena, uint32_t enabled ) {
+	union ena_aq_req *req;
+	union ena_acq_rsp *rsp;
+	union ena_feature *feature;
+	int rc;
+
+	/* Construct request */
+	req = ena_admin_req ( ena );
+	req->header.opcode = ENA_SET_FEATURE;
+	req->set_feature.id = ENA_AENQ_CONFIG;
+	feature = &req->set_feature.feature;
+	feature->aenq.enabled = cpu_to_le32 ( enabled );
+
+	/* Issue request */
+	if ( ( rc = ena_admin ( ena, req, &rsp ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
+ * Create async event notification queue
+ *
+ * @v ena		ENA device
+ * @ret rc		Return status code
+ */
+static int ena_create_async ( struct ena_nic *ena ) {
+	size_t aenq_len = ( ENA_AENQ_COUNT * sizeof ( ena->aenq.evt[0] ) );
+	int rc;
+
+	/* Allocate async event notification queue */
+	ena->aenq.evt = malloc_phys ( aenq_len, aenq_len );
+	if ( ! ena->aenq.evt ) {
+		rc = -ENOMEM;
+		goto err_alloc_aenq;
+	}
+	memset ( ena->aenq.evt, 0, aenq_len );
+
+	/* Program queue address and capabilities */
+	ena_set_base ( ena, ENA_AENQ_BASE, ena->aenq.evt );
+	ena_set_caps ( ena, ENA_AENQ_CAPS, ENA_AENQ_COUNT,
+		       sizeof ( ena->aenq.evt[0] ) );
+
+	DBGC ( ena, "ENA %p AENQ [%08lx,%08lx)\n",
+	       ena, virt_to_phys ( ena->aenq.evt ),
+	       ( virt_to_phys ( ena->aenq.evt ) + aenq_len ) );
+
+	/* Disable all events */
+	if ( ( rc = ena_set_aenq_config ( ena, 0 ) ) != 0 )
+		goto err_set_aenq_config;
+
+	return 0;
+
+ err_set_aenq_config:
+	ena_clear_caps ( ena, ENA_AENQ_CAPS );
+	free_phys ( ena->aenq.evt, aenq_len );
+ err_alloc_aenq:
+	return rc;
+}
+
+/**
+ * Destroy async event notification queue
+ *
+ * @v ena		ENA device
+ */
+static void ena_destroy_async ( struct ena_nic *ena ) {
+	size_t aenq_len = ( ENA_AENQ_COUNT * sizeof ( ena->aenq.evt[0] ) );
+
+	/* Clear queue capabilities */
+	ena_clear_caps ( ena, ENA_AENQ_CAPS );
+	wmb();
+
+	/* Free queue */
+	free_phys ( ena->aenq.evt, aenq_len );
+	DBGC ( ena, "ENA %p AENQ destroyed\n", ena );
+}
+
+/**
  * Create submission queue
  *
  * @v ena		ENA device
@@ -335,10 +446,11 @@ static int ena_create_sq ( struct ena_nic *ena, struct ena_sq *sq,
 			   struct ena_cq *cq ) {
 	union ena_aq_req *req;
 	union ena_acq_rsp *rsp;
+	unsigned int i;
 	int rc;
 
 	/* Allocate submission queue entries */
-	sq->sqe.raw = malloc_dma ( sq->len, ENA_ALIGN );
+	sq->sqe.raw = malloc_phys ( sq->len, ENA_ALIGN );
 	if ( ! sq->sqe.raw ) {
 		rc = -ENOMEM;
 		goto err_alloc;
@@ -367,15 +479,24 @@ static int ena_create_sq ( struct ena_nic *ena, struct ena_sq *sq,
 	sq->prod = 0;
 	sq->phase = ENA_SQE_PHASE;
 
-	DBGC ( ena, "ENA %p %s SQ%d at [%08lx,%08lx) db +%04x CQ%d\n",
+	/* Calculate fill level */
+	sq->fill = sq->max;
+	if ( sq->fill > cq->actual )
+		sq->fill = cq->actual;
+
+	/* Initialise buffer ID ring */
+	for ( i = 0 ; i < sq->count ; i++ )
+		sq->ids[i] = i;
+
+	DBGC ( ena, "ENA %p %s SQ%d at [%08lx,%08lx) fill %d db +%04x CQ%d\n",
 	       ena, ena_direction ( sq->direction ), sq->id,
 	       virt_to_phys ( sq->sqe.raw ),
 	       ( virt_to_phys ( sq->sqe.raw ) + sq->len ),
-	       sq->doorbell, cq->id );
+	       sq->fill, sq->doorbell, cq->id );
 	return 0;
 
  err_admin:
-	free_dma ( sq->sqe.raw, sq->len );
+	free_phys ( sq->sqe.raw, sq->len );
  err_alloc:
 	return rc;
 }
@@ -403,7 +524,7 @@ static int ena_destroy_sq ( struct ena_nic *ena, struct ena_sq *sq ) {
 		return rc;
 
 	/* Free submission queue entries */
-	free_dma ( sq->sqe.raw, sq->len );
+	free_phys ( sq->sqe.raw, sq->len );
 
 	DBGC ( ena, "ENA %p %s SQ%d destroyed\n",
 	       ena, ena_direction ( sq->direction ), sq->id );
@@ -423,7 +544,7 @@ static int ena_create_cq ( struct ena_nic *ena, struct ena_cq *cq ) {
 	int rc;
 
 	/* Allocate completion queue entries */
-	cq->cqe.raw = malloc_dma ( cq->len, ENA_ALIGN );
+	cq->cqe.raw = malloc_phys ( cq->len, ENA_ALIGN );
 	if ( ! cq->cqe.raw ) {
 		rc = -ENOMEM;
 		goto err_alloc;
@@ -435,6 +556,7 @@ static int ena_create_cq ( struct ena_nic *ena, struct ena_cq *cq ) {
 	req->header.opcode = ENA_CREATE_CQ;
 	req->create_cq.size = cq->size;
 	req->create_cq.count = cpu_to_le16 ( cq->requested );
+	req->create_cq.vector = cpu_to_le32 ( ENA_MSIX_NONE );
 	req->create_cq.address = cpu_to_le64 ( virt_to_bus ( cq->cqe.raw ) );
 
 	/* Issue request */
@@ -461,7 +583,7 @@ static int ena_create_cq ( struct ena_nic *ena, struct ena_cq *cq ) {
 	return 0;
 
  err_admin:
-	free_dma ( cq->cqe.raw, cq->len );
+	free_phys ( cq->cqe.raw, cq->len );
  err_alloc:
 	return rc;
 }
@@ -488,7 +610,7 @@ static int ena_destroy_cq ( struct ena_nic *ena, struct ena_cq *cq ) {
 		return rc;
 
 	/* Free completion queue entries */
-	free_dma ( cq->cqe.raw, cq->len );
+	free_phys ( cq->cqe.raw, cq->len );
 
 	DBGC ( ena, "ENA %p CQ%d destroyed\n", ena, cq->id );
 	return 0;
@@ -573,6 +695,32 @@ static int ena_get_device_attributes ( struct net_device *netdev ) {
 }
 
 /**
+ * Set host attributes
+ *
+ * @v ena		ENA device
+ * @ret rc		Return status code
+ */
+static int ena_set_host_attributes ( struct ena_nic *ena ) {
+	union ena_aq_req *req;
+	union ena_acq_rsp *rsp;
+	union ena_feature *feature;
+	int rc;
+
+	/* Construct request */
+	req = ena_admin_req ( ena );
+	req->header.opcode = ENA_SET_FEATURE;
+	req->set_feature.id = ENA_HOST_ATTRIBUTES;
+	feature = &req->set_feature.feature;
+	feature->host.info = cpu_to_le64 ( virt_to_bus ( ena->info ) );
+
+	/* Issue request */
+	if ( ( rc = ena_admin ( ena, req, &rsp ) ) != 0 )
+		return rc;
+
+	return 0;
+}
+
+/**
  * Get statistics (for debugging)
  *
  * @v ena		ENA device
@@ -628,13 +776,14 @@ static void ena_refill_rx ( struct net_device *netdev ) {
 	struct ena_nic *ena = netdev->priv;
 	struct io_buffer *iobuf;
 	struct ena_rx_sqe *sqe;
-	unsigned int index;
 	physaddr_t address;
 	size_t len = netdev->max_pkt_len;
 	unsigned int refilled = 0;
+	unsigned int index;
+	unsigned int id;
 
 	/* Refill queue */
-	while ( ( ena->rx.sq.prod - ena->rx.cq.cons ) < ENA_RX_COUNT ) {
+	while ( ( ena->rx.sq.prod - ena->rx.cq.cons ) < ena->rx.sq.fill ) {
 
 		/* Allocate I/O buffer */
 		iobuf = alloc_iob ( len );
@@ -643,14 +792,15 @@ static void ena_refill_rx ( struct net_device *netdev ) {
 			break;
 		}
 
-		/* Get next submission queue entry */
+		/* Get next submission queue entry and buffer ID */
 		index = ( ena->rx.sq.prod % ENA_RX_COUNT );
 		sqe = &ena->rx.sq.sqe.rx[index];
+		id = ena->rx_ids[index];
 
 		/* Construct submission queue entry */
 		address = virt_to_bus ( iobuf->data );
 		sqe->len = cpu_to_le16 ( len );
-		sqe->id = cpu_to_le16 ( ena->rx.sq.prod );
+		sqe->id = cpu_to_le16 ( id );
 		sqe->address = cpu_to_le64 ( address );
 		wmb();
 		sqe->flags = ( ENA_SQE_FIRST | ENA_SQE_LAST | ENA_SQE_CPL |
@@ -662,10 +812,10 @@ static void ena_refill_rx ( struct net_device *netdev ) {
 			ena->rx.sq.phase ^= ENA_SQE_PHASE;
 
 		/* Record I/O buffer */
-		assert ( ena->rx_iobuf[index] == NULL );
-		ena->rx_iobuf[index] = iobuf;
+		assert ( ena->rx_iobuf[id] == NULL );
+		ena->rx_iobuf[id] = iobuf;
 
-		DBGC2 ( ena, "ENA %p RX %d at [%08llx,%08llx)\n", ena, sqe->id,
+		DBGC2 ( ena, "ENA %p RX %d at [%08llx,%08llx)\n", ena, id,
 			( ( unsigned long long ) address ),
 			( ( unsigned long long ) address + len ) );
 		refilled++;
@@ -754,23 +904,25 @@ static void ena_close ( struct net_device *netdev ) {
 static int ena_transmit ( struct net_device *netdev, struct io_buffer *iobuf ) {
 	struct ena_nic *ena = netdev->priv;
 	struct ena_tx_sqe *sqe;
-	unsigned int index;
 	physaddr_t address;
+	unsigned int index;
+	unsigned int id;
 	size_t len;
 
 	/* Get next submission queue entry */
-	if ( ( ena->tx.sq.prod - ena->tx.cq.cons ) >= ENA_TX_COUNT ) {
+	if ( ( ena->tx.sq.prod - ena->tx.cq.cons ) >= ena->tx.sq.fill ) {
 		DBGC ( ena, "ENA %p out of transmit descriptors\n", ena );
 		return -ENOBUFS;
 	}
 	index = ( ena->tx.sq.prod % ENA_TX_COUNT );
 	sqe = &ena->tx.sq.sqe.tx[index];
+	id = ena->tx_ids[index];
 
 	/* Construct submission queue entry */
 	address = virt_to_bus ( iobuf->data );
 	len = iob_len ( iobuf );
 	sqe->len = cpu_to_le16 ( len );
-	sqe->id = ena->tx.sq.prod;
+	sqe->id = cpu_to_le16 ( id );
 	sqe->address = cpu_to_le64 ( address );
 	wmb();
 	sqe->flags = ( ENA_SQE_FIRST | ENA_SQE_LAST | ENA_SQE_CPL |
@@ -782,10 +934,14 @@ static int ena_transmit ( struct net_device *netdev, struct io_buffer *iobuf ) {
 	if ( ( ena->tx.sq.prod % ENA_TX_COUNT ) == 0 )
 		ena->tx.sq.phase ^= ENA_SQE_PHASE;
 
+	/* Record I/O buffer */
+	assert ( ena->tx_iobuf[id] == NULL );
+	ena->tx_iobuf[id] = iobuf;
+
 	/* Ring doorbell */
 	writel ( ena->tx.sq.prod, ( ena->regs + ena->tx.sq.doorbell ) );
 
-	DBGC2 ( ena, "ENA %p TX %d at [%08llx,%08llx)\n", ena, sqe->id,
+	DBGC2 ( ena, "ENA %p TX %d at [%08llx,%08llx)\n", ena, id,
 		( ( unsigned long long ) address ),
 		( ( unsigned long long ) address + len ) );
 	return 0;
@@ -799,7 +955,9 @@ static int ena_transmit ( struct net_device *netdev, struct io_buffer *iobuf ) {
 static void ena_poll_tx ( struct net_device *netdev ) {
 	struct ena_nic *ena = netdev->priv;
 	struct ena_tx_cqe *cqe;
+	struct io_buffer *iobuf;
 	unsigned int index;
+	unsigned int id;
 
 	/* Check for completed packets */
 	while ( ena->tx.cq.cons != ena->tx.sq.prod ) {
@@ -811,16 +969,24 @@ static void ena_poll_tx ( struct net_device *netdev ) {
 		/* Stop if completion queue entry is empty */
 		if ( ( cqe->flags ^ ena->tx.cq.phase ) & ENA_CQE_PHASE )
 			return;
-		DBGC2 ( ena, "ENA %p TX %d complete\n", ena,
-			( le16_to_cpu ( cqe->id ) >> 2 /* Don't ask */ ) );
 
 		/* Increment consumer counter */
 		ena->tx.cq.cons++;
 		if ( ! ( ena->tx.cq.cons & ena->tx.cq.mask ) )
 			ena->tx.cq.phase ^= ENA_CQE_PHASE;
 
+		/* Identify and free buffer ID */
+		id = ENA_TX_CQE_ID ( le16_to_cpu ( cqe->id ) );
+		ena->tx_ids[index] = id;
+
+		/* Identify I/O buffer */
+		iobuf = ena->tx_iobuf[id];
+		assert ( iobuf != NULL );
+		ena->tx_iobuf[id] = NULL;
+
 		/* Complete transmit */
-		netdev_tx_complete_next ( netdev );
+		DBGC2 ( ena, "ENA %p TX %d complete\n", ena, id );
+		netdev_tx_complete ( netdev, iobuf );
 	}
 }
 
@@ -834,13 +1000,14 @@ static void ena_poll_rx ( struct net_device *netdev ) {
 	struct ena_rx_cqe *cqe;
 	struct io_buffer *iobuf;
 	unsigned int index;
+	unsigned int id;
 	size_t len;
 
 	/* Check for received packets */
 	while ( ena->rx.cq.cons != ena->rx.sq.prod ) {
 
 		/* Get next completion queue entry */
-		index = ( ena->rx.cq.cons % ENA_RX_COUNT );
+		index = ( ena->rx.cq.cons & ena->rx.cq.mask );
 		cqe = &ena->rx.cq.cqe.rx[index];
 
 		/* Stop if completion queue entry is empty */
@@ -852,15 +1019,20 @@ static void ena_poll_rx ( struct net_device *netdev ) {
 		if ( ! ( ena->rx.cq.cons & ena->rx.cq.mask ) )
 			ena->rx.cq.phase ^= ENA_CQE_PHASE;
 
+		/* Identify and free buffer ID */
+		id = le16_to_cpu ( cqe->id );
+		ena->rx_ids[index] = id;
+
 		/* Populate I/O buffer */
-		iobuf = ena->rx_iobuf[index];
-		ena->rx_iobuf[index] = NULL;
+		iobuf = ena->rx_iobuf[id];
+		assert ( iobuf != NULL );
+		ena->rx_iobuf[id] = NULL;
 		len = le16_to_cpu ( cqe->len );
 		iob_put ( iobuf, len );
 
 		/* Hand off to network stack */
 		DBGC2 ( ena, "ENA %p RX %d complete (length %zd)\n",
-			ena, le16_to_cpu ( cqe->id ), len );
+			ena, id, len );
 		netdev_rx ( netdev, iobuf );
 	}
 }
@@ -898,6 +1070,45 @@ static struct net_device_operations ena_operations = {
  */
 
 /**
+ * Assign memory BAR
+ *
+ * @v ena		ENA device
+ * @v pci		PCI device
+ * @ret rc		Return status code
+ *
+ * Some BIOSes in AWS EC2 are observed to fail to assign a base
+ * address to the ENA device.  The device is the only device behind
+ * its bridge, and the BIOS does assign a memory window to the bridge.
+ * We therefore place the device at the start of the memory window.
+ */
+static int ena_membase ( struct ena_nic *ena, struct pci_device *pci ) {
+	struct pci_bridge *bridge;
+
+	/* Locate PCI bridge */
+	bridge = pcibridge_find ( pci );
+	if ( ! bridge ) {
+		DBGC ( ena, "ENA %p found no PCI bridge\n", ena );
+		return -ENOTCONN;
+	}
+
+	/* Sanity check */
+	if ( PCI_SLOT ( pci->busdevfn ) || PCI_FUNC ( pci->busdevfn ) ) {
+		DBGC ( ena, "ENA %p at " PCI_FMT " may not be only device "
+		       "on bus\n", ena, PCI_ARGS ( pci ) );
+		return -ENOTSUP;
+	}
+
+	/* Place device at start of memory window */
+	pci_write_config_dword ( pci, PCI_BASE_ADDRESS_0, bridge->membase );
+	pci->membase = bridge->membase;
+	DBGC ( ena, "ENA %p at " PCI_FMT " claiming bridge " PCI_FMT " mem "
+	       "%08x\n", ena, PCI_ARGS ( pci ), PCI_ARGS ( bridge->pci ),
+	       bridge->membase );
+
+	return 0;
+}
+
+/**
  * Probe PCI device
  *
  * @v pci		PCI device
@@ -906,6 +1117,7 @@ static struct net_device_operations ena_operations = {
 static int ena_probe ( struct pci_device *pci ) {
 	struct net_device *netdev;
 	struct ena_nic *ena;
+	struct ena_host_info *info;
 	int rc;
 
 	/* Allocate and initialise net device */
@@ -922,22 +1134,45 @@ static int ena_probe ( struct pci_device *pci ) {
 	ena->acq.phase = ENA_ACQ_PHASE;
 	ena_cq_init ( &ena->tx.cq, ENA_TX_COUNT,
 		      sizeof ( ena->tx.cq.cqe.tx[0] ) );
-	ena_sq_init ( &ena->tx.sq, ENA_SQ_TX, ENA_TX_COUNT,
-		      sizeof ( ena->tx.sq.sqe.tx[0] ) );
+	ena_sq_init ( &ena->tx.sq, ENA_SQ_TX, ENA_TX_COUNT, ENA_TX_COUNT,
+		      sizeof ( ena->tx.sq.sqe.tx[0] ), ena->tx_ids );
 	ena_cq_init ( &ena->rx.cq, ENA_RX_COUNT,
 		      sizeof ( ena->rx.cq.cqe.rx[0] ) );
-	ena_sq_init ( &ena->rx.sq, ENA_SQ_RX, ENA_RX_COUNT,
-		      sizeof ( ena->rx.sq.sqe.rx[0] ) );
+	ena_sq_init ( &ena->rx.sq, ENA_SQ_RX, ENA_RX_COUNT, ENA_RX_FILL,
+		      sizeof ( ena->rx.sq.sqe.rx[0] ), ena->rx_ids );
 
 	/* Fix up PCI device */
 	adjust_pci_device ( pci );
 
+	/* Fix up PCI BAR if left unassigned by BIOS */
+	if ( ( ! pci->membase ) && ( ( rc = ena_membase ( ena, pci ) ) != 0 ) )
+		goto err_membase;
+
 	/* Map registers */
-	ena->regs = ioremap ( pci->membase, ENA_BAR_SIZE );
+	ena->regs = pci_ioremap ( pci, pci->membase, ENA_BAR_SIZE );
 	if ( ! ena->regs ) {
 		rc = -ENODEV;
 		goto err_ioremap;
 	}
+
+	/* Allocate and initialise host info */
+	info = malloc_phys ( PAGE_SIZE, PAGE_SIZE );
+	if ( ! info ) {
+		rc = -ENOMEM;
+		goto err_info;
+	}
+	ena->info = info;
+	memset ( info, 0, PAGE_SIZE );
+	info->type = cpu_to_le32 ( ENA_HOST_INFO_TYPE_LINUX );
+	snprintf ( info->dist_str, sizeof ( info->dist_str ), "%s",
+		   ( product_name[0] ? product_name : product_short_name ) );
+	snprintf ( info->kernel_str, sizeof ( info->kernel_str ), "%s",
+		   product_version );
+	info->version = cpu_to_le32 ( ENA_HOST_INFO_VERSION_WTF );
+	info->spec = cpu_to_le16 ( ENA_HOST_INFO_SPEC_2_0 );
+	info->busdevfn = cpu_to_le16 ( pci->busdevfn );
+	DBGC2 ( ena, "ENA %p host info:\n", ena );
+	DBGC2_HDA ( ena, virt_to_phys ( info ), info, sizeof ( *info ) );
 
 	/* Reset the NIC */
 	if ( ( rc = ena_reset ( ena ) ) != 0 )
@@ -946,6 +1181,14 @@ static int ena_probe ( struct pci_device *pci ) {
 	/* Create admin queues */
 	if ( ( rc = ena_create_admin ( ena ) ) != 0 )
 		goto err_create_admin;
+
+	/* Create async event notification queue */
+	if ( ( rc = ena_create_async ( ena ) ) != 0 )
+		goto err_create_async;
+
+	/* Set host attributes */
+	if ( ( rc = ena_set_host_attributes ( ena ) ) != 0 )
+		goto err_set_host_attributes;
 
 	/* Fetch MAC address */
 	if ( ( rc = ena_get_device_attributes ( netdev ) ) != 0 )
@@ -965,12 +1208,18 @@ static int ena_probe ( struct pci_device *pci ) {
 	unregister_netdev ( netdev );
  err_register_netdev:
  err_get_device_attributes:
+ err_set_host_attributes:
+	ena_destroy_async ( ena );
+ err_create_async:
 	ena_destroy_admin ( ena );
  err_create_admin:
 	ena_reset ( ena );
  err_reset:
+	free_phys ( ena->info, PAGE_SIZE );
+ err_info:
 	iounmap ( ena->regs );
  err_ioremap:
+ err_membase:
 	netdev_nullify ( netdev );
 	netdev_put ( netdev );
  err_alloc:
@@ -989,11 +1238,17 @@ static void ena_remove ( struct pci_device *pci ) {
 	/* Unregister network device */
 	unregister_netdev ( netdev );
 
+	/* Destroy async event notification queue */
+	ena_destroy_async ( ena );
+
 	/* Destroy admin queues */
 	ena_destroy_admin ( ena );
 
 	/* Reset card */
 	ena_reset ( ena );
+
+	/* Free host info */
+	free_phys ( ena->info, PAGE_SIZE );
 
 	/* Free network device */
 	iounmap ( ena->regs );

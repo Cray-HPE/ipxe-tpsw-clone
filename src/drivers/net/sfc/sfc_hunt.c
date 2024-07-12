@@ -2,9 +2,10 @@
  *
  * Device driver for Solarflare Communications EF10 devices
  *
- * Written by Shradha Shah <sshah@solarflare.com>
+ * Written by Shradha Shah, maintained by <pre-boot-drivers@xilinx.com>
  *
- * Copyright 2012-2017 Solarflare Communications Inc.
+ * Copyright 2012-2019 Solarflare Communications Inc.
+ * Copyright 2019-2020 Xilinx Inc.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -1042,7 +1043,7 @@ static void hunt_ev_fini(struct hunt_nic *hunt)
 static void
 hunt_poll(struct net_device *netdev)
 {
-	struct hunt_nic *hunt = netdev_priv(netdev);
+	struct hunt_nic *hunt = netdev->priv;
 
 	/* If called while already polling, return immediately */
 	if (hunt->efx.state & EFX_STATE_POLLING)
@@ -1070,7 +1071,7 @@ hunt_poll(struct net_device *netdev)
  ******************************************************************************/
 static int hunt_open(struct net_device *netdev)
 {
-	struct hunt_nic *hunt = netdev_priv(netdev);
+	struct hunt_nic *hunt = netdev->priv;
 	int rc;
 
 	/* Allocate VIs */
@@ -1132,7 +1133,7 @@ fail2:
 
 static void hunt_close(struct net_device *netdev)
 {
-	struct hunt_nic *hunt = netdev_priv(netdev);
+	struct hunt_nic *hunt = netdev->priv;
 
 	/* Stop datapath */
 	efx_hunt_close(netdev);
@@ -1186,7 +1187,7 @@ hunt_probe(struct pci_device *pci)
 	netdev->dev = &pci->dev;
 	netdev->state |= NETDEV_IRQ_UNSUPPORTED;
 
-	hunt = netdev_priv(netdev);
+	hunt = netdev->priv;
 	memset(hunt, 0, sizeof(*hunt));
 	efx = &hunt->efx;
 
@@ -1289,7 +1290,7 @@ fail1:
 static void hunt_remove(struct pci_device *pci)
 {
 	struct net_device *netdev = pci_get_drvdata(pci);
-	struct hunt_nic *hunt = netdev_priv(netdev);
+	struct hunt_nic *hunt = netdev->priv;
 
 	if (!(hunt->flags &
 	      (1 << MC_CMD_DRV_ATTACH_EXT_OUT_FLAG_NO_ACTIVE_PORT))) {
@@ -1314,6 +1315,8 @@ const struct efx_nic_type hunt_nic_type = {
 };
 
 static struct pci_device_id hunt_nics[] = {
+	PCI_ROM(0x1924, 0x0903, "SFC9120", "Solarflare SFC9120 Adapter", 0),
+	PCI_ROM(0x1924, 0x0923, "SFC9140", "Solarflare SFC9140 Adapter", 0),
 	PCI_ROM(0x1924, 0x0a03, "SFC9220", "Solarflare SFN8xxx Adapter", 0),
 	PCI_ROM(0x1924, 0x0b03, "SFC9250", "Solarflare X25xx Adapter", 0),
 };

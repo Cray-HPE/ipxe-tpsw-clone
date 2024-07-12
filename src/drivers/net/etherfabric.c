@@ -3025,7 +3025,7 @@ falcon_free_special_buffer ( void *p )
 {
 	/* We don't bother cleaning up the buffer table entries -
 	 * we're hardly limited */
-	free_dma ( p, EFAB_BUF_ALIGN );
+	free_phys ( p, EFAB_BUF_ALIGN );
 }
 
 static void*
@@ -3038,7 +3038,7 @@ falcon_alloc_special_buffer ( struct efab_nic *efab, int bytes,
 	unsigned long dma_addr;
 
 	/* Allocate the buffer, aligned on a buffer address boundary */
-	buffer = malloc_dma ( bytes, EFAB_BUF_ALIGN );
+	buffer = malloc_phys ( bytes, EFAB_BUF_ALIGN );
 	if ( ! buffer )
 		return NULL;
 
@@ -3725,7 +3725,7 @@ efab_receive ( struct efab_nic *efab, unsigned int id, int len, int drop )
 static int
 efab_transmit ( struct net_device *netdev, struct io_buffer *iob )
 {
-	struct efab_nic *efab = netdev_priv ( netdev );
+	struct efab_nic *efab = netdev->priv;
 	struct efab_tx_queue *tx_queue = &efab->tx_queue;
 	int fill_level, space;
 	falcon_tx_desc_t *txd;
@@ -3844,7 +3844,7 @@ falcon_handle_event ( struct efab_nic *efab, falcon_event_t *evt )
 static void
 efab_poll ( struct net_device *netdev )
 {
-	struct efab_nic *efab = netdev_priv ( netdev );
+	struct efab_nic *efab = netdev->priv;
 	struct efab_ev_queue *ev_queue = &efab->ev_queue;
 	struct efab_rx_queue *rx_queue = &efab->rx_queue;
 	falcon_event_t *evt;
@@ -3883,7 +3883,7 @@ efab_poll ( struct net_device *netdev )
 static void
 efab_irq ( struct net_device *netdev, int enable )
 {
-	struct efab_nic *efab = netdev_priv ( netdev );
+	struct efab_nic *efab = netdev->priv;
 	struct efab_ev_queue *ev_queue = &efab->ev_queue;
 
 	switch ( enable ) {
@@ -4032,7 +4032,7 @@ efab_init_mac ( struct efab_nic *efab )
 static void
 efab_close ( struct net_device *netdev )
 {
-	struct efab_nic *efab = netdev_priv ( netdev );
+	struct efab_nic *efab = netdev->priv;
 
 	falcon_fini_resources ( efab );
 	efab_free_resources ( efab );
@@ -4043,7 +4043,7 @@ efab_close ( struct net_device *netdev )
 static int
 efab_open ( struct net_device *netdev )
 {
-	struct efab_nic *efab = netdev_priv ( netdev );
+	struct efab_nic *efab = netdev->priv;
 	struct efab_rx_queue *rx_queue = &efab->rx_queue;
 	int rc;
 
@@ -4104,7 +4104,7 @@ static void
 efab_remove ( struct pci_device *pci )
 {
 	struct net_device *netdev = pci_get_drvdata ( pci );
-	struct efab_nic *efab = netdev_priv ( netdev );
+	struct efab_nic *efab = netdev->priv;
 
 	if ( efab->membase ) {
 		falcon_reset ( efab );
@@ -4143,14 +4143,14 @@ efab_probe ( struct pci_device *pci )
 	pci_set_drvdata ( pci, netdev );
 	netdev->dev = &pci->dev;
 
-	efab = netdev_priv ( netdev );
+	efab = netdev->priv;
 	memset ( efab, 0, sizeof ( *efab ) );
 	efab->netdev = netdev;
 
 	/* Get iobase/membase */
 	mmio_start = pci_bar_start ( pci, PCI_BASE_ADDRESS_2 );
 	mmio_len = pci_bar_size ( pci, PCI_BASE_ADDRESS_2 );
-	efab->membase = ioremap ( mmio_start, mmio_len );
+	efab->membase = pci_ioremap ( pci, mmio_start, mmio_len );
 	EFAB_TRACE ( "BAR of %lx bytes at phys %lx mapped at %p\n",
 		     mmio_len, mmio_start, efab->membase );
 

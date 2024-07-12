@@ -23,6 +23,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <string.h>
 #include <errno.h>
 #include <ipxe/efi/efi.h>
+#include <ipxe/efi/efi_path.h>
 #include <ipxe/efi/efi_pci.h>
 #include <ipxe/efi/efi_utils.h>
 
@@ -33,58 +34,31 @@ FILE_LICENCE ( GPL2_OR_LATER );
  */
 
 /**
- * Find end of device path
- *
- * @v path		Path to device
- * @ret path_end	End of device path
- */
-EFI_DEVICE_PATH_PROTOCOL * efi_devpath_end ( EFI_DEVICE_PATH_PROTOCOL *path ) {
-
-	while ( path->Type != END_DEVICE_PATH_TYPE ) {
-		path = ( ( ( void * ) path ) +
-			 /* There's this amazing new-fangled thing known as
-			  * a UINT16, but who wants to use one of those? */
-			 ( ( path->Length[1] << 8 ) | path->Length[0] ) );
-	}
-
-	return path;
-}
-
-/**
- * Find length of device path (excluding terminator)
- *
- * @v path		Path to device
- * @ret path_len	Length of device path
- */
-size_t efi_devpath_len ( EFI_DEVICE_PATH_PROTOCOL *path ) {
-	EFI_DEVICE_PATH_PROTOCOL *end = efi_devpath_end ( path );
-
-	return ( ( ( void * ) end ) - ( ( void * ) path ) );
-}
-
-/**
  * Locate parent device supporting a given protocol
  *
  * @v device		EFI device handle
  * @v protocol		Protocol GUID
  * @v parent		Parent EFI device handle to fill in
+ * @v skip		Number of protocol-supporting parent devices to skip
  * @ret rc		Return status code
  */
 int efi_locate_device ( EFI_HANDLE device, EFI_GUID *protocol,
-			EFI_HANDLE *parent ) {
+			EFI_HANDLE *parent, unsigned int skip ) {
 	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	union {
 		EFI_DEVICE_PATH_PROTOCOL *path;
 		void *interface;
-	} path;
-	EFI_DEVICE_PATH_PROTOCOL *devpath;
+	} u;
+	EFI_DEVICE_PATH_PROTOCOL *path;
+	EFI_DEVICE_PATH_PROTOCOL *end;
+	size_t len;
 	EFI_STATUS efirc;
 	int rc;
 
 	/* Get device path */
 	if ( ( efirc = bs->OpenProtocol ( device,
 					  &efi_device_path_protocol_guid,
-					  &path.interface,
+					  &u.interface,
 					  efi_image_handle, device,
 					  EFI_OPEN_PROTOCOL_GET_PROTOCOL ))!=0){
 		rc = -EEFI ( efirc );
@@ -92,22 +66,46 @@ int efi_locate_device ( EFI_HANDLE device, EFI_GUID *protocol,
 		       efi_handle_name ( device ), strerror ( rc ) );
 		goto err_open_device_path;
 	}
-	devpath = path.path;
 
-	/* Check for presence of specified protocol */
-	if ( ( efirc = bs->LocateDevicePath ( protocol, &devpath,
-					      parent ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFIDEV %s has no parent supporting %s: %s\n",
-		       efi_handle_name ( device ),
-		       efi_guid_ntoa ( protocol ), strerror ( rc ) );
-		goto err_locate_protocol;
+	/* Create modifiable copy of device path */
+	len = ( efi_path_len ( u.path ) + sizeof ( EFI_DEVICE_PATH_PROTOCOL ));
+	path = malloc ( len );
+	if ( ! path ) {
+		rc = -ENOMEM;
+		goto err_alloc_path;
+	}
+	memcpy ( path, u.path, len );
+
+	/* Locate parent device(s) */
+	while ( 1 ) {
+
+		/* Check for presence of specified protocol */
+		end = path;
+		if ( ( efirc = bs->LocateDevicePath ( protocol, &end,
+						      parent ) ) != 0 ) {
+			rc = -EEFI ( efirc );
+			DBGC ( device, "EFIDEV %s has no parent supporting "
+			       "%s: %s\n", efi_devpath_text ( path ),
+			       efi_guid_ntoa ( protocol ), strerror ( rc ) );
+			goto err_locate_protocol;
+		}
+
+		/* Stop if we have skipped the requested number of devices */
+		if ( ! skip-- )
+			break;
+
+		/* Trim device path */
+		efi_path_terminate ( end );
+		end = efi_path_prev ( path, end );
+		efi_path_terminate ( end );
 	}
 
 	/* Success */
 	rc = 0;
 
  err_locate_protocol:
+	free ( path );
+ err_alloc_path:
 	bs->CloseProtocol ( device, &efi_device_path_protocol_guid,
 			    efi_image_handle, device );
  err_open_device_path:
@@ -175,28 +173,28 @@ void efi_child_del ( EFI_HANDLE parent, EFI_HANDLE child ) {
 static int efi_pci_info ( EFI_HANDLE device, const char *prefix,
 			  struct device *dev ) {
 	EFI_HANDLE pci_device;
-	struct pci_device pci;
+	struct efi_pci_device efipci;
 	int rc;
 
 	/* Find parent PCI device */
 	if ( ( rc = efi_locate_device ( device, &efi_pci_io_protocol_guid,
-					&pci_device ) ) != 0 ) {
+					&pci_device, 0 ) ) != 0 ) {
 		DBGC ( device, "EFIDEV %s is not a PCI device: %s\n",
 		       efi_handle_name ( device ), strerror ( rc ) );
 		return rc;
 	}
 
 	/* Get PCI device information */
-	if ( ( rc = efipci_info ( pci_device, &pci ) ) != 0 ) {
+	if ( ( rc = efipci_info ( pci_device, &efipci ) ) != 0 ) {
 		DBGC ( device, "EFIDEV %s could not get PCI information: %s\n",
 		       efi_handle_name ( device ), strerror ( rc ) );
 		return rc;
 	}
 
 	/* Populate device information */
-	memcpy ( &dev->desc, &pci.dev.desc, sizeof ( dev->desc ) );
+	memcpy ( &dev->desc, &efipci.pci.dev.desc, sizeof ( dev->desc ) );
 	snprintf ( dev->name, sizeof ( dev->name ), "%s-%s",
-		   prefix, pci.dev.name );
+		   prefix, efipci.pci.dev.name );
 
 	return 0;
 }

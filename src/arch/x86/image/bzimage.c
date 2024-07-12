@@ -247,18 +247,20 @@ static void bzimage_update_header ( struct image *image,
  *
  * @v image		bzImage file
  * @v bzimg		bzImage context
- * @v cmdline		Kernel command line
  * @ret rc		Return status code
  */
 static int bzimage_parse_cmdline ( struct image *image,
-				   struct bzimage_context *bzimg,
-				   const char *cmdline ) {
-	char *vga;
-	char *mem;
+				   struct bzimage_context *bzimg ) {
+	const char *vga;
+	const char *mem;
+	char *sep;
+	char *end;
 
 	/* Look for "vga=" */
-	if ( ( vga = strstr ( cmdline, "vga=" ) ) ) {
-		vga += 4;
+	if ( ( vga = image_argument ( image, "vga=" ) ) ) {
+		sep = strchr ( vga, ' ' );
+		if ( sep )
+			*sep = '\0';
 		if ( strcmp ( vga, "normal" ) == 0 ) {
 			bzimg->vid_mode = BZI_VID_MODE_NORMAL;
 		} else if ( strcmp ( vga, "ext" ) == 0 ) {
@@ -266,19 +268,20 @@ static int bzimage_parse_cmdline ( struct image *image,
 		} else if ( strcmp ( vga, "ask" ) == 0 ) {
 			bzimg->vid_mode = BZI_VID_MODE_ASK;
 		} else {
-			bzimg->vid_mode = strtoul ( vga, &vga, 0 );
-			if ( *vga && ( *vga != ' ' ) ) {
-				DBGC ( image, "bzImage %p strange \"vga=\""
-				       "terminator '%c'\n", image, *vga );
+			bzimg->vid_mode = strtoul ( vga, &end, 0 );
+			if ( *end ) {
+				DBGC ( image, "bzImage %p strange \"vga=\" "
+				       "terminator '%c'\n", image, *end );
 			}
 		}
+		if ( sep )
+			*sep = ' ';
 	}
 
 	/* Look for "mem=" */
-	if ( ( mem = strstr ( cmdline, "mem=" ) ) ) {
-		mem += 4;
-		bzimg->mem_limit = strtoul ( mem, &mem, 0 );
-		switch ( *mem ) {
+	if ( ( mem = image_argument ( image, "mem=" ) ) ) {
+		bzimg->mem_limit = strtoul ( mem, &end, 0 );
+		switch ( *end ) {
 		case 'G':
 		case 'g':
 			bzimg->mem_limit <<= 10;
@@ -296,7 +299,7 @@ static int bzimage_parse_cmdline ( struct image *image,
 			break;
 		default:
 			DBGC ( image, "bzImage %p strange \"mem=\" "
-			       "terminator '%c'\n", image, *mem );
+			       "terminator '%c'\n", image, *end );
 			break;
 		}
 		bzimg->mem_limit -= 1;
@@ -310,11 +313,10 @@ static int bzimage_parse_cmdline ( struct image *image,
  *
  * @v image		bzImage image
  * @v bzimg		bzImage context
- * @v cmdline		Kernel command line
  */
 static void bzimage_set_cmdline ( struct image *image,
-				  struct bzimage_context *bzimg,
-				  const char *cmdline ) {
+				  struct bzimage_context *bzimg ) {
+	const char *cmdline = ( image->cmdline ? image->cmdline : "" );
 	size_t cmdline_len;
 
 	/* Copy command line down to real-mode portion */
@@ -324,32 +326,6 @@ static void bzimage_set_cmdline ( struct image *image,
 	copy_to_user ( bzimg->rm_kernel, bzimg->rm_cmdline,
 		       cmdline, cmdline_len );
 	DBGC ( image, "bzImage %p command line \"%s\"\n", image, cmdline );
-}
-
-/**
- * Parse standalone image command line for cpio parameters
- *
- * @v image		bzImage file
- * @v cpio		CPIO header
- * @v cmdline		Command line
- */
-static void bzimage_parse_cpio_cmdline ( struct image *image,
-					 struct cpio_header *cpio,
-					 const char *cmdline ) {
-	char *arg;
-	char *end;
-	unsigned int mode;
-
-	/* Look for "mode=" */
-	if ( ( arg = strstr ( cmdline, "mode=" ) ) ) {
-		arg += 5;
-		mode = strtoul ( arg, &end, 8 /* Octal for file mode */ );
-		if ( *end && ( *end != ' ' ) ) {
-			DBGC ( image, "bzImage %p strange \"mode=\""
-			       "terminator '%c'\n", image, *end );
-		}
-		cpio_set_field ( cpio->c_mode, ( 0100000 | mode ) );
-	}
 }
 
 /**
@@ -374,37 +350,17 @@ static inline size_t bzimage_align ( size_t len ) {
 static size_t bzimage_load_initrd ( struct image *image,
 				    struct image *initrd,
 				    userptr_t address ) {
-	char *filename = initrd->cmdline;
-	char *cmdline;
+	const char *filename = cpio_name ( initrd );
 	struct cpio_header cpio;
 	size_t offset;
-	size_t name_len;
 	size_t pad_len;
 
-	/* Do not include kernel image itself as an initrd */
-	if ( initrd == image )
+	/* Skip hidden images */
+	if ( initrd->flags & IMAGE_HIDDEN )
 		return 0;
 
 	/* Create cpio header for non-prebuilt images */
-	if ( filename && filename[0] ) {
-		cmdline = strchr ( filename, ' ' );
-		name_len = ( ( cmdline ? ( ( size_t ) ( cmdline - filename ) )
-			       : strlen ( filename ) ) + 1 /* NUL */ );
-		memset ( &cpio, '0', sizeof ( cpio ) );
-		memcpy ( cpio.c_magic, CPIO_MAGIC, sizeof ( cpio.c_magic ) );
-		cpio_set_field ( cpio.c_mode, 0100644 );
-		cpio_set_field ( cpio.c_nlink, 1 );
-		cpio_set_field ( cpio.c_filesize, initrd->len );
-		cpio_set_field ( cpio.c_namesize, name_len );
-		if ( cmdline ) {
-			bzimage_parse_cpio_cmdline ( image, &cpio,
-						     ( cmdline + 1 /* ' ' */ ));
-		}
-		offset = ( ( sizeof ( cpio ) + name_len + 0x03 ) & ~0x03 );
-	} else {
-		offset = 0;
-		name_len = 0;
-	}
+	offset = cpio_header ( initrd, &cpio );
 
 	/* Copy in initrd image body (and cpio header if applicable) */
 	if ( address ) {
@@ -413,7 +369,7 @@ static size_t bzimage_load_initrd ( struct image *image,
 			memset_user ( address, 0, 0, offset );
 			copy_to_user ( address, 0, &cpio, sizeof ( cpio ) );
 			copy_to_user ( address, sizeof ( cpio ), filename,
-				       ( name_len - 1 /* NUL (or space) */ ) );
+				       cpio_name_len ( initrd ) );
 		}
 		DBGC ( image, "bzImage %p initrd %p [%#08lx,%#08lx,%#08lx)"
 		       "%s%s\n", image, initrd, user_to_phys ( address, 0 ),
@@ -449,10 +405,6 @@ static int bzimage_check_initrds ( struct image *image,
 
 	/* Calculate total loaded length of initrds */
 	for_each_image ( initrd ) {
-
-		/* Skip kernel */
-		if ( initrd == image )
-			continue;
 
 		/* Calculate length */
 		len += bzimage_load_initrd ( image, initrd, UNULL );
@@ -568,7 +520,6 @@ static void bzimage_load_initrds ( struct image *image,
  */
 static int bzimage_exec ( struct image *image ) {
 	struct bzimage_context bzimg;
-	const char *cmdline = ( image->cmdline ? image->cmdline : "" );
 	int rc;
 
 	/* Read and parse header from image */
@@ -591,7 +542,7 @@ static int bzimage_exec ( struct image *image ) {
 	}
 
 	/* Parse command line for bootloader parameters */
-	if ( ( rc = bzimage_parse_cmdline ( image, &bzimg, cmdline ) ) != 0)
+	if ( ( rc = bzimage_parse_cmdline ( image, &bzimg ) ) != 0)
 		return rc;
 
 	/* Check that initrds can be loaded */
@@ -608,7 +559,7 @@ static int bzimage_exec ( struct image *image ) {
 		      bzimg.rm_filesz, bzimg.pm_sz );
 
 	/* Store command line */
-	bzimage_set_cmdline ( image, &bzimg, cmdline );
+	bzimage_set_cmdline ( image, &bzimg );
 
 	/* Prepare for exiting.  Must do this before loading initrds,
 	 * since loading the initrds will corrupt the external heap.

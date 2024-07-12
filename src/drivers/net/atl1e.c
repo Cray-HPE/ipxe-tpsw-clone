@@ -173,7 +173,7 @@ static int atl1e_check_link(struct atl1e_adapter *adapter)
 static int atl1e_mdio_read(struct net_device *netdev, int phy_id __unused,
 			   int reg_num)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 	u16 result;
 
 	atl1e_read_phy_reg(&adapter->hw, reg_num & MDIO_REG_ADDR_MASK, &result);
@@ -183,7 +183,7 @@ static int atl1e_mdio_read(struct net_device *netdev, int phy_id __unused,
 static void atl1e_mdio_write(struct net_device *netdev, int phy_id __unused,
 			     int reg_num, int val)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 
 	atl1e_write_phy_reg(&adapter->hw, reg_num & MDIO_REG_ADDR_MASK, val);
 }
@@ -370,7 +370,7 @@ static void atl1e_free_ring_resources(struct atl1e_adapter *adapter)
 	atl1e_clean_rx_ring(adapter);
 
 	if (adapter->ring_vir_addr) {
-		free_dma(adapter->ring_vir_addr, adapter->ring_size);
+		free_phys(adapter->ring_vir_addr, adapter->ring_size);
 		adapter->ring_vir_addr = NULL;
 		adapter->ring_dma = 0;
 	}
@@ -405,7 +405,7 @@ static int atl1e_setup_ring_resources(struct atl1e_adapter *adapter)
 	/* real ring DMA buffer */
 
 	size = adapter->ring_size;
-	adapter->ring_vir_addr = malloc_dma(adapter->ring_size, 32);
+	adapter->ring_vir_addr = malloc_phys(adapter->ring_size, 32);
 
 	if (adapter->ring_vir_addr == NULL) {
 		DBG("atl1e: out of memory allocating %d bytes for %s ring\n",
@@ -841,7 +841,7 @@ fatal_err:
  */
 static void atl1e_poll(struct net_device *netdev)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 	struct atl1e_hw *hw = &adapter->hw;
 	int max_ints = 64;
 	u32 status;
@@ -963,7 +963,7 @@ static void atl1e_tx_queue(struct atl1e_adapter *adapter, u16 count __unused,
 
 static int atl1e_xmit_frame(struct net_device *netdev, struct io_buffer *iob)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 	u16 tpd_req = 1;
 	struct atl1e_tpd_desc *tpd;
 
@@ -1013,7 +1013,7 @@ int atl1e_up(struct atl1e_adapter *adapter)
 
 void atl1e_irq(struct net_device *netdev, int enable)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 
 	if (enable)
 		atl1e_irq_enable(adapter);
@@ -1051,7 +1051,7 @@ void atl1e_down(struct atl1e_adapter *adapter)
  */
 static int atl1e_open(struct net_device *netdev)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 	int err;
 
 	/* allocate rx/tx dma buffer & descriptors */
@@ -1086,7 +1086,7 @@ err_up:
  */
 static void atl1e_close(struct net_device *netdev)
 {
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 
 	atl1e_down(adapter);
 	atl1e_free_ring_resources(adapter);
@@ -1138,7 +1138,7 @@ static int atl1e_probe(struct pci_device *pdev)
 
 	atl1e_init_netdev(netdev, pdev);
 
-	adapter = netdev_priv(netdev);
+	adapter = netdev->priv;
 	adapter->bd_number = cards_found;
 	adapter->netdev = netdev;
 	adapter->pdev = pdev;
@@ -1227,7 +1227,7 @@ err:
 static void atl1e_remove(struct pci_device *pdev)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
-	struct atl1e_adapter *adapter = netdev_priv(netdev);
+	struct atl1e_adapter *adapter = netdev->priv;
 
 	unregister_netdev(netdev);
 	atl1e_free_ring_resources(adapter);

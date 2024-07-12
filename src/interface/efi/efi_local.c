@@ -35,9 +35,10 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <ipxe/uri.h>
 #include <ipxe/iobuf.h>
 #include <ipxe/process.h>
+#include <ipxe/errortab.h>
 #include <ipxe/efi/efi.h>
 #include <ipxe/efi/efi_strings.h>
-#include <ipxe/efi/efi_utils.h>
+#include <ipxe/efi/efi_path.h>
 #include <ipxe/efi/Protocol/SimpleFileSystem.h>
 #include <ipxe/efi/Guid/FileInfo.h>
 #include <ipxe/efi/Guid/FileSystemInfo.h>
@@ -47,6 +48,17 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  * EFI local file access
  *
  */
+
+/* Disambiguate the various error causes */
+#define EINFO_EEFI_OPEN							\
+	__einfo_uniqify ( EINFO_EPLATFORM, 0x01, "Could not open" )
+#define EINFO_EEFI_OPEN_NOT_FOUND					\
+	__einfo_platformify ( EINFO_EEFI_OPEN, EFI_NOT_FOUND,		\
+			      "Not found" )
+#define EEFI_OPEN_NOT_FOUND						\
+	__einfo_error ( EINFO_EEFI_OPEN_NOT_FOUND )
+#define EEFI_OPEN( efirc ) EPLATFORM ( EINFO_EEFI_OPEN, efirc,		\
+				       EEFI_OPEN_NOT_FOUND )
 
 /** Download blocksize */
 #define EFI_LOCAL_BLKSIZE 4096
@@ -60,6 +72,13 @@ struct efi_local {
 	/** Download process */
 	struct process process;
 
+	/** Download URI */
+	struct uri *uri;
+	/** Volume name, or NULL to use loaded image's device */
+	const char *volume;
+	/** File path */
+	const char *path;
+
 	/** EFI root directory */
 	EFI_FILE_PROTOCOL *root;
 	/** EFI file */
@@ -67,6 +86,24 @@ struct efi_local {
 	/** Length of file */
 	size_t len;
 };
+
+/** Human-readable error messages */
+struct errortab efi_local_errors[] __errortab = {
+	__einfo_errortab ( EINFO_EEFI_OPEN_NOT_FOUND ),
+};
+
+/**
+ * Free local file
+ *
+ * @v refcnt		Reference count
+ */
+static void efi_local_free ( struct refcnt *refcnt ) {
+	struct efi_local *local =
+		container_of ( refcnt, struct efi_local, refcnt );
+
+	uri_put ( local->uri );
+	free ( local );
+}
 
 /**
  * Close local file
@@ -94,91 +131,6 @@ static void efi_local_close ( struct efi_local *local, int rc ) {
 		local->root = NULL;
 	}
 }
-
-/**
- * Local file process
- *
- * @v local		Local file
- */
-static void efi_local_step ( struct efi_local *local ) {
-	EFI_FILE_PROTOCOL *file = local->file;
-	struct io_buffer *iobuf = NULL;
-	size_t remaining;
-	size_t frag_len;
-	UINTN size;
-	EFI_STATUS efirc;
-	int rc;
-
-	/* Wait until data transfer interface is ready */
-	if ( ! xfer_window ( &local->xfer ) )
-		return;
-
-	/* Presize receive buffer */
-	remaining = local->len;
-	xfer_seek ( &local->xfer, remaining );
-	xfer_seek ( &local->xfer, 0 );
-
-	/* Get file contents */
-	while ( remaining ) {
-
-		/* Calculate length for this fragment */
-		frag_len = remaining;
-		if ( frag_len > EFI_LOCAL_BLKSIZE )
-			frag_len = EFI_LOCAL_BLKSIZE;
-
-		/* Allocate I/O buffer */
-		iobuf = xfer_alloc_iob ( &local->xfer, frag_len );
-		if ( ! iobuf ) {
-			rc = -ENOMEM;
-			goto err;
-		}
-
-		/* Read block */
-		size = frag_len;
-		if ( ( efirc = file->Read ( file, &size, iobuf->data ) ) != 0 ){
-			rc = -EEFI ( efirc );
-			DBGC ( local, "LOCAL %p could not read from file: %s\n",
-			       local, strerror ( rc ) );
-			goto err;
-		}
-		assert ( size <= frag_len );
-		iob_put ( iobuf, size );
-
-		/* Deliver data */
-		if ( ( rc = xfer_deliver_iob ( &local->xfer,
-					       iob_disown ( iobuf ) ) ) != 0 ) {
-			DBGC ( local, "LOCAL %p could not deliver data: %s\n",
-			       local, strerror ( rc ) );
-			goto err;
-		}
-
-		/* Move to next block */
-		remaining -= frag_len;
-	}
-
-	/* Close download */
-	efi_local_close ( local, 0 );
-
-	return;
-
- err:
-	free_iob ( iobuf );
-	efi_local_close ( local, rc );
-}
-
-/** Data transfer interface operations */
-static struct interface_operation efi_local_operations[] = {
-	INTF_OP ( xfer_window_changed, struct efi_local *, efi_local_step ),
-	INTF_OP ( intf_close, struct efi_local *, efi_local_close ),
-};
-
-/** Data transfer interface descriptor */
-static struct interface_descriptor efi_local_xfer_desc =
-	INTF_DESC ( struct efi_local, xfer, efi_local_operations );
-
-/** Process descriptor */
-static struct process_descriptor efi_local_process_desc =
-	PROC_DESC_ONCE ( struct efi_local, process, efi_local_step );
 
 /**
  * Check for matching volume name
@@ -298,15 +250,15 @@ static int efi_local_open_root ( struct efi_local *local, EFI_HANDLE device,
  * Open root filesystem of specified volume
  *
  * @v local		Local file
- * @v volume		Volume name, or NULL to use loaded image's device
  * @ret rc		Return status code
  */
-static int efi_local_open_volume ( struct efi_local *local,
-				   const char *volume ) {
+static int efi_local_open_volume ( struct efi_local *local ) {
 	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	EFI_GUID *protocol = &efi_simple_file_system_protocol_guid;
 	int ( * check ) ( struct efi_local *local, EFI_HANDLE device,
 			  EFI_FILE_PROTOCOL *root, const char *volume );
+	const char *volume = local->volume;
+	EFI_DEVICE_PATH_PROTOCOL *path;
 	EFI_FILE_PROTOCOL *root;
 	EFI_HANDLE *handles;
 	EFI_HANDLE device;
@@ -328,8 +280,18 @@ static int efi_local_open_volume ( struct efi_local *local,
 		}
 		check = efi_local_check_volume_name;
 	} else {
-		/* Use our loaded image's device handle */
-		handles = &efi_loaded_image->DeviceHandle;
+		/* Locate filesystem from which we were loaded */
+		path = efi_loaded_image_path;
+		if ( ( efirc = bs->LocateDevicePath ( protocol, &path,
+						      &device ) ) != 0 ) {
+			rc = -EEFI ( efirc );
+			DBGC ( local, "LOCAL %p could not locate file system "
+			       "on %s: %s\n", local,
+			       efi_devpath_text ( efi_loaded_image_path ),
+			       strerror ( rc ) );
+			return rc;
+		}
+		handles = &device;
 		num_handles = 1;
 		check = NULL;
 	}
@@ -394,7 +356,7 @@ static int efi_local_open_resolved ( struct efi_local *local,
 	/* Open file */
 	if ( ( efirc = local->root->Open ( local->root, &file, name,
 					   EFI_FILE_MODE_READ, 0 ) ) != 0 ) {
-		rc = -EEFI ( efirc );
+		rc = -EEFI_OPEN ( efirc );
 		DBGC ( local, "LOCAL %p could not open \"%s\": %s\n",
 		       local, resolved, strerror ( rc ) );
 		return rc;
@@ -408,14 +370,13 @@ static int efi_local_open_resolved ( struct efi_local *local,
  * Open specified path
  *
  * @v local		Local file
- * @v path		Path to file
  * @ret rc		Return status code
  */
-static int efi_local_open_path ( struct efi_local *local, const char *path ) {
-	FILEPATH_DEVICE_PATH *fp = container_of ( efi_loaded_image->FilePath,
-						  FILEPATH_DEVICE_PATH, Header);
-	size_t fp_len = ( fp ? efi_devpath_len ( &fp->Header ) : 0 );
-	char base[ fp_len / 2 /* Cannot exceed this length */ ];
+static int efi_local_open_path ( struct efi_local *local ) {
+	EFI_DEVICE_PATH_PROTOCOL *path = efi_loaded_image->FilePath;
+	EFI_DEVICE_PATH_PROTOCOL *next;
+	FILEPATH_DEVICE_PATH *fp;
+	char base[ efi_path_len ( path ) / 2 /* Cannot exceed this length */ ];
 	size_t remaining = sizeof ( base );
 	size_t len;
 	char *resolved;
@@ -425,13 +386,12 @@ static int efi_local_open_path ( struct efi_local *local, const char *path ) {
 	/* Construct base path to our own image, if possible */
 	memset ( base, 0, sizeof ( base ) );
 	tmp = base;
-	while ( fp && ( fp->Header.Type != END_DEVICE_PATH_TYPE ) ) {
+	for ( ; ( next = efi_path_next ( path ) ) ; path = next ) {
+		fp = container_of ( path, FILEPATH_DEVICE_PATH, Header );
 		len = snprintf ( tmp, remaining, "%ls", fp->PathName );
 		assert ( len < remaining );
 		tmp += len;
 		remaining -= len;
-		fp = ( ( ( void * ) fp ) + ( ( fp->Header.Length[1] << 8 ) |
-					     fp->Header.Length[0] ) );
 	}
 	DBGC2 ( local, "LOCAL %p base path \"%s\"\n",
 		local, base );
@@ -443,7 +403,7 @@ static int efi_local_open_path ( struct efi_local *local, const char *path ) {
 	}
 
 	/* Resolve path */
-	resolved = resolve_path ( base, path );
+	resolved = resolve_path ( base, local->path );
 	if ( ! resolved ) {
 		rc = -ENOMEM;
 		goto err_resolve;
@@ -513,6 +473,106 @@ static int efi_local_len ( struct efi_local *local ) {
 }
 
 /**
+ * Local file process
+ *
+ * @v local		Local file
+ */
+static void efi_local_step ( struct efi_local *local ) {
+	struct io_buffer *iobuf = NULL;
+	size_t remaining;
+	size_t frag_len;
+	UINTN size;
+	EFI_STATUS efirc;
+	int rc;
+
+	/* Wait until data transfer interface is ready */
+	if ( ! xfer_window ( &local->xfer ) )
+		return;
+
+	/* Open specified volume root directory, if not yet open */
+	if ( ( ! local->root ) &&
+	     ( ( rc = efi_local_open_volume ( local ) ) != 0 ) )
+		goto err;
+
+	/* Open specified file, if not yet open */
+	if ( ( ! local->file ) &&
+	     ( ( rc = efi_local_open_path ( local ) ) != 0 ) )
+		goto err;
+
+	/* Get file length, if not yet known */
+	if ( ( ! local->len ) &&
+	     ( ( rc = efi_local_len ( local ) ) != 0 ) )
+		goto err;
+
+	/* Presize receive buffer */
+	remaining = local->len;
+	xfer_seek ( &local->xfer, remaining );
+	xfer_seek ( &local->xfer, 0 );
+
+	/* Get file contents */
+	while ( remaining ) {
+
+		/* Calculate length for this fragment */
+		frag_len = remaining;
+		if ( frag_len > EFI_LOCAL_BLKSIZE )
+			frag_len = EFI_LOCAL_BLKSIZE;
+
+		/* Allocate I/O buffer */
+		iobuf = xfer_alloc_iob ( &local->xfer, frag_len );
+		if ( ! iobuf ) {
+			rc = -ENOMEM;
+			goto err;
+		}
+
+		/* Read block */
+		size = frag_len;
+		if ( ( efirc = local->file->Read ( local->file, &size,
+						   iobuf->data ) ) != 0 ) {
+			rc = -EEFI ( efirc );
+			DBGC ( local, "LOCAL %p could not read from file: %s\n",
+			       local, strerror ( rc ) );
+			goto err;
+		}
+		assert ( size <= frag_len );
+		iob_put ( iobuf, size );
+
+		/* Deliver data */
+		if ( ( rc = xfer_deliver_iob ( &local->xfer,
+					       iob_disown ( iobuf ) ) ) != 0 ) {
+			DBGC ( local, "LOCAL %p could not deliver data: %s\n",
+			       local, strerror ( rc ) );
+			goto err;
+		}
+
+		/* Move to next block */
+		remaining -= frag_len;
+	}
+
+	/* Close download */
+	efi_local_close ( local, 0 );
+
+	return;
+
+ err:
+	free_iob ( iobuf );
+	efi_local_close ( local, rc );
+}
+
+/** Data transfer interface operations */
+static struct interface_operation efi_local_operations[] = {
+	INTF_OP ( xfer_window_changed, struct efi_local *, efi_local_step ),
+	INTF_OP ( intf_close, struct efi_local *, efi_local_close ),
+};
+
+/** Data transfer interface descriptor */
+static struct interface_descriptor efi_local_xfer_desc =
+	INTF_DESC ( struct efi_local, xfer, efi_local_operations );
+
+/** Process descriptor */
+static struct process_descriptor efi_local_process_desc =
+	PROC_DESC_ONCE ( struct efi_local, process, efi_local_step );
+
+/**
  * Open local file
  *
  * @v xfer		Data transfer interface
@@ -521,49 +581,26 @@ static int efi_local_len ( struct efi_local *local ) {
  */
 static int efi_local_open ( struct interface *xfer, struct uri *uri ) {
 	struct efi_local *local;
-	const char *volume;
-	const char *path;
-	int rc;
-
-	/* Parse URI */
-	volume = ( ( uri->host && uri->host[0] ) ? uri->host : NULL );
-	path = ( uri->opaque ? uri->opaque : uri->path );
 
 	/* Allocate and initialise structure */
 	local = zalloc ( sizeof ( *local ) );
-	if ( ! local ) {
-		rc = -ENOMEM;
-		goto err_alloc;
-	}
-	ref_init ( &local->refcnt, NULL );
+	if ( ! local )
+		return -ENOMEM;
+	ref_init ( &local->refcnt, efi_local_free );
 	intf_init ( &local->xfer, &efi_local_xfer_desc, &local->refcnt );
-	process_init ( &local->process, &efi_local_process_desc,
-		       &local->refcnt );
+	process_init_stopped ( &local->process, &efi_local_process_desc,
+			       &local->refcnt );
+	local->uri = uri_get ( uri );
+	local->volume = ( ( uri->host && uri->host[0] ) ? uri->host : NULL );
+	local->path = ( uri->opaque ? uri->opaque : uri->path );
 
-	/* Open specified volume */
-	if ( ( rc = efi_local_open_volume ( local, volume ) ) != 0 )
-		goto err_open_root;
-
-	/* Open specified path */
-	if ( ( rc = efi_local_open_path ( local, path ) ) != 0 )
-		goto err_open_file;
-
-	/* Get length of file */
-	if ( ( rc = efi_local_len ( local ) ) != 0 )
-		goto err_len;
+	/* Start download process */
+	process_add ( &local->process );
 
 	/* Attach to parent interface, mortalise self, and return */
 	intf_plug_plug ( &local->xfer, xfer );
 	ref_put ( &local->refcnt );
 	return 0;
-
- err_len:
- err_open_file:
- err_open_root:
-	efi_local_close ( local, 0 );
-	ref_put ( &local->refcnt );
- err_alloc:
-	return rc;
 }
 
 /** EFI local file URI opener */

@@ -3,21 +3,15 @@
   The UEFI Random Number Generator Protocol is used to provide random bits for use
   in applications, or entropy for seeding other random number generators.
 
-Copyright (c) 2013, Intel Corporation. All rights reserved.<BR>
-This program and the accompanying materials are licensed and made available under
-the terms and conditions of the BSD License that accompanies this distribution.
-The full text of the license may be found at
-http://opensource.org/licenses/bsd-license.php.
-
-THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
-WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+Copyright (c) 2013 - 2018, Intel Corporation. All rights reserved.<BR>
+SPDX-License-Identifier: BSD-2-Clause-Patent
 
 **/
 
 #ifndef __EFI_RNG_PROTOCOL_H__
 #define __EFI_RNG_PROTOCOL_H__
 
-FILE_LICENCE ( BSD3 );
+FILE_LICENCE ( BSD2_PATENT );
 
 ///
 /// Global ID for the Random Number Generator Protocol
@@ -75,6 +69,15 @@ typedef EFI_GUID EFI_RNG_ALGORITHM;
   { \
     0xe43176d7, 0xb6e8, 0x4827, {0xb7, 0x84, 0x7f, 0xfd, 0xc4, 0xb6, 0x85, 0x61 } \
   }
+///
+/// The Arm Architecture states the RNDR that the DRBG algorithm should be compliant
+/// with NIST SP800-90A, while not mandating a particular algorithm, so as to be
+/// inclusive of different geographies.
+///
+#define EFI_RNG_ALGORITHM_ARM_RNDR \
+  { \
+    0x43d2fde3, 0x9d4e, 0x4d79,  {0x02, 0x96, 0xa8, 0x9b, 0xca, 0x78, 0x08, 0x41} \
+  }
 
 /**
   Returns information about the random number generation implementation.
@@ -101,7 +104,7 @@ typedef EFI_GUID EFI_RNG_ALGORITHM;
 **/
 typedef
 EFI_STATUS
-(EFIAPI *EFI_RNG_GET_INFO) (
+(EFIAPI *EFI_RNG_GET_INFO)(
   IN EFI_RNG_PROTOCOL             *This,
   IN OUT UINTN                    *RNGAlgorithmListSize,
   OUT EFI_RNG_ALGORITHM           *RNGAlgorithmList
@@ -131,9 +134,9 @@ EFI_STATUS
 **/
 typedef
 EFI_STATUS
-(EFIAPI *EFI_RNG_GET_RNG) (
+(EFIAPI *EFI_RNG_GET_RNG)(
   IN EFI_RNG_PROTOCOL            *This,
-  IN EFI_RNG_ALGORITHM           *RNGAlgorithm, OPTIONAL
+  IN EFI_RNG_ALGORITHM           *RNGAlgorithm  OPTIONAL,
   IN UINTN                       RNGValueLength,
   OUT UINT8                      *RNGValue
   );
@@ -143,16 +146,17 @@ EFI_STATUS
 /// applications, or entropy for seeding other random number generators.
 ///
 struct _EFI_RNG_PROTOCOL {
-  EFI_RNG_GET_INFO                GetInfo;
-  EFI_RNG_GET_RNG                 GetRNG;
+  EFI_RNG_GET_INFO    GetInfo;
+  EFI_RNG_GET_RNG     GetRNG;
 };
 
-extern EFI_GUID gEfiRngProtocolGuid;
-extern EFI_GUID gEfiRngAlgorithmSp80090Hash256Guid;
-extern EFI_GUID gEfiRngAlgorithmSp80090Hmac256Guid;
-extern EFI_GUID gEfiRngAlgorithmSp80090Ctr256Guid;
-extern EFI_GUID gEfiRngAlgorithmX9313DesGuid;
-extern EFI_GUID gEfiRngAlgorithmX931AesGuid;
-extern EFI_GUID gEfiRngAlgorithmRaw;
+extern EFI_GUID  gEfiRngProtocolGuid;
+extern EFI_GUID  gEfiRngAlgorithmSp80090Hash256Guid;
+extern EFI_GUID  gEfiRngAlgorithmSp80090Hmac256Guid;
+extern EFI_GUID  gEfiRngAlgorithmSp80090Ctr256Guid;
+extern EFI_GUID  gEfiRngAlgorithmX9313DesGuid;
+extern EFI_GUID  gEfiRngAlgorithmX931AesGuid;
+extern EFI_GUID  gEfiRngAlgorithmRaw;
+extern EFI_GUID  gEfiRngAlgorithmArmRndr;
 
 #endif
