@@ -1,4 +1,4 @@
-# Copyright 2021 Hewlett Packard Enterprise Development LP
+# Copyright 2021-2023 Hewlett Packard Enterprise Development LP
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -23,7 +23,7 @@
 # SPEC file for ipxe package
 #  This is a build of the ipxe software stack, with Cray additions for
 #  packaging purposes.
-
+%global vendorroot ./vendor/github.com/Cray-HPE/ipxe
 Name: ipxe
 BuildArch: noarch
 Group: Development/Tools/Building
@@ -52,9 +52,9 @@ Requires: syslinux >= 4.0
 Summary: The iPXE Software Stack for creating NIC bootable firmware
 
 %description devel
-This is the iPXE devel firmware software stack, which is used for the creation 
-of boot ROMs. These ROMs allow hardware to boot from centralized network 
-locations using stanadard exchange protocols (HTTP, HTTPS, TFTP, iSCSI SAN, 
+This is the iPXE devel firmware software stack, which is used for the creation
+of boot ROMs. These ROMs allow hardware to boot from centralized network
+locations using stanadard exchange protocols (HTTP, HTTPS, TFTP, iSCSI SAN,
 Fibre Channel SAN, WANs, inifinibands, and chainloads from multiple sources).
 
 %prep
@@ -63,8 +63,8 @@ Fibre Channel SAN, WANs, inifinibands, and chainloads from multiple sources).
 %build
 
 %install
-mkdir -p                 %{buildroot}/opt/%{name}/src
-cp -r src/*              %{buildroot}/opt/%{name}/src/.
+mkdir -p %{buildroot}/opt/%{name}/src
+cp -r %{vendorroot}/src/* %{buildroot}/opt/%{name}/src/.
 find %{buildroot}/opt/%{name}/src -name .gitignore -exec rm {} \;
 
 %clean
@@ -88,5 +88,8 @@ find %{buildroot}/opt/%{name}/src -name .gitignore -exec rm {} \;
 /opt/%{name}/src/include/xen/import.pl
 
 %changelog
+* Tue Feb 28 2023 doomslayer@hpe.com
+- Switch to Cray-HPE's iPXE fork
+- Use the HPC configuration
 * Mon Mar 12 2018 jsl@cray.com
 - Version 1.0.0 initial check-in

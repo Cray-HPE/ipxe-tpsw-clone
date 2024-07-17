@@ -5,9 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- Git Vendor (`vendor/`) of [iPXE](https://github.com/Cray-HPE/ipxe) fork; same source as [metal-ipxe](https://github.com/Cray-HPE/metal-ipxe)
+
 ### Changed
-- Disabled concurrent Jenkins builds on same branch/commit
-- Added build timeout to avoid hung builds
+
+- Use [`hpc` iPXE configuration](https://github.com/Cray-HPE/ipxe/tree/master/src/config/hpc)
+- Jenkins
+    - Disabled concurrent Jenkins builds on same branch/commit
+    - Added build timeout to avoid hung builds
+
+### Removed
+- `src/` directory, iPXE is now git-vendored
+- Removed `LINK_WAIT` timings ([MTL-1957](https://jira-pro.it.hpe.com:8443/browse/MTL-1957))
 
 ### Dependencies
 - Bump `actions/checkout` from 3 to 4 ([#29](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/29))
