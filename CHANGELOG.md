@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2024-07-17
 ### Added
 
 - Git Vendor (`vendor/`) of [iPXE](https://github.com/Cray-HPE/ipxe) fork; same source as [metal-ipxe](https://github.com/Cray-HPE/metal-ipxe)
