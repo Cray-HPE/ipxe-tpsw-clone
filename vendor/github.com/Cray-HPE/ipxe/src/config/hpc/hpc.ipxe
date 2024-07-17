@@ -1,0 +1,85 @@
+#!ipxe
+
+set print-nics:int8 0
+:nics_scan
+echo === NIC DISCOVERY ==================================
+# Must start at 0; uint does not start at 0.
+set idx:int8 0
+:check isset ${net${idx}/mac} || goto checked
+  echo net${idx} MAC ${net${idx}/mac} PCI.DeviceID ${pci/${net${idx}/busloc}.2.2} PCI.VendorID ${pci/${net${idx}/busloc}.0.2}
+  inc idx && goto check
+:checked
+iseq ${print-nics} 1 && prompt Press any key to continue && goto menu || goto menu
+
+echo === LINK ===========================================
+set vidx:int8 0
+:linkcheck isset ${net${vidx}/mac} || goto opened
+  ifopen net${vidx} && ifstat net${vidx} || echo Failed to open net${vidx}
+  inc vidx && goto linkcheck
+:opened
+
+:menu
+echo === Loading Menu ... ===============================
+# This should be coded to always point to our LiveCD alias and nothing else.
+# Figure out if client is 64-bit capable
+colour --basic 0 4
+cpair --background 4 0
+set menu-timeout 2000
+
+# Get cpu architecture
+iseq ${buildarch} arm64 && goto arm64 ||
+cpuid --ext 29 && goto x86_64 || goto i386
+
+:arm64
+  set arch arm64
+  set archb 64
+  set archl arm64
+  goto start
+
+:x86_64
+  set arch x86_64
+  set archb 64
+  set archl x86_64
+  goto start
+
+:i386
+  set arch i386
+  set archb 32
+  set archl i386
+  goto start
+
+:start
+menu Metal Pre-Boot :: ${manufacturer} ${product} (${archb}bit)
+item --gap -- ---------------- Choices       ----------------
+item --key n nics     Print (N)IC information
+item --key r reboot         (R)eboot
+item --key e bios           (E)xit to BIOS Menu
+item
+item --gap -- ---------------- Advanced configuration ----------------
+item --key i config   Configure / View (i)PXE settings
+item --key s shell    Enter iPXE (s)hell
+item
+choose --default default target || goto cancel ||
+goto ${target}
+
+:bios
+echo Exiting PXE ROM, dropping into BIOS ...
+exit 0
+
+:nics
+set print-nics 1
+goto nics_scan
+
+:config
+config
+goto start
+
+:shell
+echo Type 'exit' to get the back to the menu
+shell
+set menu-timeout 0
+goto start
+
+:cancel
+echo Menu cancelled, dropping to iPXE shell ...
+goto shell

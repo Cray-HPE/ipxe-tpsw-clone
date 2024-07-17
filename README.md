@@ -65,3 +65,31 @@ on github, this is done by the setVersionFiles() function.
 
 ## Copyright and License
 See each individual file for information on its copyright and license.
+
+## Updating the iPXE source
+
+iPXE is pulled in using `git vendor`[^1], pulling the [Cray-HPE fork of iPXE](https://github.com/Cray-HPE/ipxe).
+
+To update the pulled reference of iPXE specify a branch, ref, or tag:
+
+- Branch
+
+    ```bash
+    git vendor update ipxe master
+    ```
+
+- Ref
+
+    ```bash
+    git vendor update ipxe a2941c315a805b28a9ea13a2425e32da23a35607
+    ```
+
+Note that using `git vendor` creates 2 commits:
+
+  - One commit showing the squashed history
+  - Another commit showing the update of the local `vendor/` folder
+
+These commits will merge into one commit if a `git rebase` is executed, this is not necessarily bad however the Git history
+will appear different to the user.
+
+[^1]: `git vendor` is a wrapper for `git substree`

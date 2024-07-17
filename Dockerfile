@@ -1,7 +1,7 @@
 #
 # MIT License
 #
-# (C) Copyright 2018, 2021-2023 Hewlett Packard Enterprise Development LP
+# (C) Copyright 2018, 2021-2024 Hewlett Packard Enterprise Development LP
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -38,7 +38,7 @@ RUN apt -y install gcc make gcc-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
                    genisoimage xz-utils libc-dev bash git
 
 # Add the source directory into the image
-COPY src /ipxe
+COPY vendor/github.com/Cray-HPE/ipxe/src /ipxe
 
 # In the near future, we will not copy a local checkout of the ipxe source.
 # Instead, we will checkout from the official repository via a tag or a
@@ -52,47 +52,37 @@ COPY src /ipxe
 #ARG IPXE_GIT_SOURCE=git@github.com:ipxe/ipxe.git
 #ARG IPXE_GIT_TAG=v1.21.1
 #RUN git clone --depth 1 --branch $IPXE_GIT_TAG $IPXE_GIT_SOURCE
-
-# Apply any global configuration and source patches to the build environment.
-# All patches in the local_config directory are applied BEFORE precompiling. All
-# global config changes MUST be compatible with existing downstream build environments.
-# All files within the content of the config directory are diff patches; they
-# are applied in alphanumeric order, in case it ever matters.
-FROM base as patch
-ENTRYPOINT ['/bin/bash']
-COPY patches /patches
-RUN chmod +x /patches/apply.sh && /patches/apply.sh
-
-# Set the operational working directory for builds to be inside the ipxe dir
 WORKDIR /ipxe
 
 # Make a number of statically compiled ROMs; this primes the image by linking the
 # appropriate C objects, which speeds up the creation of images in the next
 # downstream docker image, as well, tests the build environment for sanity
 # before the building container image enters production.
-FROM patch as precompile
+FROM base as precompile
 COPY etc /sample
-RUN make bin/undionly.kpxe
-RUN make bin/ipxe.iso
-RUN make bin/ipxe.usb
-RUN make bin-x86_64-efi/ipxe.efi
+RUN make CONFIG=hpc bin/undionly.kpxe
+RUN make CONFIG=hpc bin/ipxe.usb
+RUN make CONFIG=hpc bin-x86_64-efi/ipxe.efi
 # Workflow for basic x86 based ipxe.efi nodes
 RUN cp /sample/cert_sample /ipxe/cert_sample && \
     cp /sample/bss_sample_script.txt /ipxe/bss_sample_script.txt && \
     export TOKEN=$(cat /sample/s3_sample_jwt) && \
-    make bin-x86_64-efi/ipxe.efi \
+    make CONFIG=hpc bin-x86_64-efi/ipxe.efi \
         DEBUG=httpcore,x509,efi_time \
         CERT=cert_sample TRUST=cert_sample \
         EMBED=bss_sample_script.txt && \
         BEARER_TOKEN=$TOKEN && \
+        S3_HOST=$S3_HOST && \
     rm /ipxe/cert_sample /ipxe/bss_sample_script.txt /ipxe/bin-x86_64-efi/ipxe.efi
 # Workflow for basic aarch64 based ipxe.efi nodes
 RUN cp /sample/cert_sample /ipxe/cert_sample && \
     cp /sample/bss_sample_script.txt /ipxe/bss_sample_script.txt && \
     export TOKEN=$(cat /sample/s3_sample_jwt) && \
-    make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 bin-arm64-efi/ipxe.efi \
+    make CONFIG=hpc CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 bin-arm64-efi/ipxe.efi \
         DEBUG=httpcore,x509,efi_time \
         CERT=cert_sample TRUST=cert_sample \
         EMBED=bss_sample_script.txt && \
         BEARER_TOKEN=$TOKEN && \
+        S3_HOST=$S3_HOST && \
     rm /ipxe/cert_sample /ipxe/bss_sample_script.txt /ipxe/bin-arm64-efi/ipxe.efi
+
