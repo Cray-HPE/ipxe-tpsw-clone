@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `README.adoc` with new maintenance and usage directions needed after [MTL-2104](https://jira-pro.it.hpe.com:8443/browse/MTL-2104)
 - Changed `README.md` to asciidoc (`README.adoc`)
 
 ## [4.0.0] - 2024-07-17

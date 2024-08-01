@@ -12,16 +12,104 @@ make
 
 == Maintaining
 
-=== Where did this repo come from and how is it used?
+This repository contains a vendored checkout of the link:https://github.com/Cray-HPE/ipxe[Cray-HPE/ipxe,window=blank,opts=nofollow] repository, a fork of link:https://github.com/ipxe/ipxe[ipxe/ipxe,window=blank,opts=nofollow].
 
-* This repo is a clone of the scms ipxe-tpsw-fork repo which was obtained from the Cray TPSW ipxe repo which was last updated on 08/21/2018. The repo also contains Cray ipxe customizations.
-* This repo uses the master branch for current code development.
-* The base Docker image for the cms-ipxe container is built from the contents of this repo.
-* This repo also tracks the external ipxe Git repo at https://git.ipxe.org/ipxe.git
-* Future updates to the ipxe source can be fetched from the external repo into a branch where they can be integrated, tested and then merged into master using the standard PR process.
+=== Metal iPXE
 
-Significant changes should be first vetted in the opensource community, and if possible, picked from the upstream
-source.
+CSM uses two iPXE applications, both of which pull the same iPXE source:
+
+ipxe-tpsw-clone:: (this repository) is packaged by link:https://github.com/Cray-HPE/cms-ipxe[cms-ipxe] as a helm chart for deployment to a Kubernetes cluster.
+metal-ipxe:: (link:https://github.com/Cray-HPE/metal-ipxe[repo link]) packages an RPM for serving iPXE in bare-metal environments (e.g. the pre-install toolkit).
+
+Parity needs to be maintained between the helm charts and RPM artifacts for a consistent user experience between CSM bootstrap and CSM runtime contexts.
+
+=== Changing non-iPXE source
+
+Features, patches, and other changes that do not pertain to the `vendor/` directory should be made by making pull-requests to link:https://github.com/Cray-HPE/ipxe-tpsw-clone[Cray-HPE/ipxe-tpsw-clone].
+
+iPXE source code changes should be made in the form of pull-requests to link:https://github.com/Cray-HPE/ipxe[Cray-HPE/ipxe,window=blank,opts=nofollow], followed by a subsequent pull-request to this repository to update the vendored iPXE code.
+
+IMPORTANT: Cray-HPE/ipxe-tpsw-clone has a sister repository, link:https://github.com/Cray-HPE/metal-ipxe[Cray-HPE/metal-ipxe].
+In order to keep parity between the two iPXE applications, updating the iPXE source code in ipxe-tpsw-clone entails reciprocating a pull-request in the other repository.
+
+For more information on updating the iPXE code, read <<Official iPXE source process>> and <<Merging iPXE>>.
+
+==== Official iPXE source process
+
+. Checkout and push a new branch to link:https://github.com/Cray-HPE/ipxe[Cray-HPE/ipxe]
+. Checkout a new branch in link:https://github.com/Cray-HPE/ipxe-tpsw-clone[Cray-HPE/ipxe-tpsw-clone]
+. Vendor update the ipxe-tpsw-clone branch with the pushed Cray-HPE/ipxe branch
+. Reciprocate the vendor update in link:https://github.com/Cray-HPE/metal-ipxe[Cray-hpe/metal-ipxe]
++
+[source,bash]
+----
+git vendor update ipxe <Cray-HPE/ipxe branch name>
+git push
+----
++
+.Example
+[source,bash]
+....
+git clone git@github.com:Cray-HPE/ipxe.git
+git clone git@github.com:Cray-HPE/ipxe-tpsw-clone.git
+cd ipxe
+git checkout -b my-ipxe-branch
+vim src/config/hpc/general.h
+git commit -a -m 'Enables telnet boots'
+git push
+cd ../ipxe-tpsw-clone
+git checkout -b my-ipxe-tpsw-branch
+git vendor update ipxe my-ipxe-branch
+git push
+....
+. Every subsequent change can be pulled in by re-running `git vendor update ipxe <Cray-HPE/ipxe branch name>`.
+
+==== Quick-n-dirty testing alternative
+
+For quicker testing/build iterations, edit the iPXE code in this repository under `vendor/github.com/Cray-HPE/ipxe/`.
+
+CAUTION: Merging manual edits of content under `vendor` will break git-vendoring. After the developer is content with their changes, the changes need to be made through the <<Official iPXE source process>>.
+
+. See <<Merging iPXE>>.
+
+==== Merging iPXE
+
+. Once the developer has merged changes into Cray-HPE/ipxe, they must update their Cray-HPE/ipxe-tpsw-clone branch against the Cray-HPE/ipxe base branch they targeted.
++
+[source,bash]
+----
+git vendor update ipxe main
+----
+* For cleaner git-history, rebase ipxe-tpsw-clone and drop all of the development vendor updates
++
+[source,bash]
+----
+git rebase -i develop
+----
++
+`drop` the vendor update commits.
++
+[source,githubexpressionlanguage]
+....
+pick 0581c8a79 normal commit doing normal things
+drop 138664e89 Squashed 'vendor/github.com/Cray-HPE/metal-provision/' changes from b183411c6..226481bdf
+drop 05e9c5eb2 Squashed 'vendor/github.com/Cray-HPE/metal-provision/' changes from 226481bdf..cb38b5ecf
+....
++
+Now vendor update against `main` (or other target base branch)
++
+[source,bash]
+----
+git vendor update ipxe main
+----
+Force update your remote
++
+[source,bash]
+----
+git push origin --force-with-lease
+----
+. Finally, ipxe-tpsw-clone has a sister repository for serving iPXE that it needs to maintain parity with at link:https://github.com/Cray-HPE/metal-ipxe[].
+Make a similar pull-request in that repository, vendoring in the same Cray-HPE/ipxe branch as the ipxe-tpsw-clone pull-request.
 
 === Patches
 
@@ -29,16 +117,6 @@ Features should be implemented in the form of patch files that can be found in t
 applied to the upstream source at docker build time, such that when the docker build is finished, all affected changes
 to the source should be able to be pre-built using one of the existing pre-compile build tests. This ensures a
 pre-checkout test as well as an opportunity to compile linked objects within the build environment ahead of time.
-
-==== Creating a Patch
-
-Standard linux patch/diff tools are used:
-[source,bash]
-----
-diff -u /ipxe/config/general.h /ipxe/config/general.h.new &gt; /patches/enable_https.patch
-----
-
-Add your patch to `patches/apply.sh`
 
 == Developing in an OSX environment
 
@@ -81,31 +159,3 @@ on github, this is done by the `setVersionFiles()` function.
 == Copyright and License
 
 See each individual file for information on its copyright and license.
-
-== Updating the iPXE source
-
-iPXE is pulled in using `git vendor` footnote:[`git vendor` is a wrapper for `git substree`.], pulling the https://github.com/Cray-HPE/ipxe[Cray-HPE fork of iPXE].
-
-To update the pulled reference of iPXE specify a branch, ref, or tag:
-
-* Branch
-
-[source,bash]
-----
-git vendor update ipxe master
-----
-
-* Ref
-
-[source,bash]
-----
-git vendor update ipxe a2941c315a805b28a9ea13a2425e32da23a35607
-----
-
-Note that using `git vendor` creates 2 commits:
-
-* One commit showing the squashed history
-* Another commit showing the update of the local `vendor/` folder
-
-These commits will merge into one commit if a `git rebase` is executed, this is not necessarily bad however the Git history
-will appear different to the user.
