@@ -1,0 +1,161 @@
+= iPXE
+:toc:
+:toclevels: 3
+
+== Developing quick start
+
+[source,bash]
+----
+cd src
+make
+----
+
+== Maintaining
+
+This repository contains a vendored checkout of the link:https://github.com/Cray-HPE/ipxe[Cray-HPE/ipxe,window=blank,opts=nofollow] repository, a fork of link:https://github.com/ipxe/ipxe[ipxe/ipxe,window=blank,opts=nofollow].
+
+=== Metal iPXE
+
+CSM uses two iPXE applications, both of which pull the same iPXE source:
+
+ipxe-tpsw-clone:: (this repository) is packaged by link:https://github.com/Cray-HPE/cms-ipxe[cms-ipxe] as a helm chart for deployment to a Kubernetes cluster.
+metal-ipxe:: (link:https://github.com/Cray-HPE/metal-ipxe[repo link]) packages an RPM for serving iPXE in bare-metal environments (e.g. the pre-install toolkit).
+
+Parity needs to be maintained between the helm charts and RPM artifacts for a consistent user experience between CSM bootstrap and CSM runtime contexts.
+
+=== Changing non-iPXE source
+
+Features, patches, and other changes that do not pertain to the `vendor/` directory should be made by making pull-requests to link:https://github.com/Cray-HPE/ipxe-tpsw-clone[Cray-HPE/ipxe-tpsw-clone].
+
+iPXE source code changes should be made in the form of pull-requests to link:https://github.com/Cray-HPE/ipxe[Cray-HPE/ipxe,window=blank,opts=nofollow], followed by a subsequent pull-request to this repository to update the vendored iPXE code.
+
+IMPORTANT: Cray-HPE/ipxe-tpsw-clone has a sister repository, link:https://github.com/Cray-HPE/metal-ipxe[Cray-HPE/metal-ipxe].
+In order to keep parity between the two iPXE applications, updating the iPXE source code in ipxe-tpsw-clone entails reciprocating a pull-request in the other repository.
+
+For more information on updating the iPXE code, read <<Official iPXE source process>> and <<Merging iPXE>>.
+
+==== Official iPXE source process
+
+. Checkout and push a new branch to link:https://github.com/Cray-HPE/ipxe[Cray-HPE/ipxe]
+. Checkout a new branch in link:https://github.com/Cray-HPE/ipxe-tpsw-clone[Cray-HPE/ipxe-tpsw-clone]
+. Vendor update the ipxe-tpsw-clone branch with the pushed Cray-HPE/ipxe branch
+. Reciprocate the vendor update in link:https://github.com/Cray-HPE/metal-ipxe[Cray-hpe/metal-ipxe]
++
+[source,bash]
+----
+git vendor update ipxe <Cray-HPE/ipxe branch name>
+git push
+----
++
+.Example
+[source,bash]
+....
+git clone git@github.com:Cray-HPE/ipxe.git
+git clone git@github.com:Cray-HPE/ipxe-tpsw-clone.git
+cd ipxe
+git checkout -b my-ipxe-branch
+vim src/config/hpc/general.h
+git commit -a -m 'Enables telnet boots'
+git push
+cd ../ipxe-tpsw-clone
+git checkout -b my-ipxe-tpsw-branch
+git vendor update ipxe my-ipxe-branch
+git push
+....
+. Every subsequent change can be pulled in by re-running `git vendor update ipxe <Cray-HPE/ipxe branch name>`.
+
+==== Quick-n-dirty testing alternative
+
+For quicker testing/build iterations, edit the iPXE code in this repository under `vendor/github.com/Cray-HPE/ipxe/`.
+
+CAUTION: Merging manual edits of content under `vendor` will break git-vendoring. After the developer is content with their changes, the changes need to be made through the <<Official iPXE source process>>.
+
+. See <<Merging iPXE>>.
+
+==== Merging iPXE
+
+. Once the developer has merged changes into Cray-HPE/ipxe, they must update their Cray-HPE/ipxe-tpsw-clone branch against the Cray-HPE/ipxe base branch they targeted.
++
+[source,bash]
+----
+git vendor update ipxe main
+----
+* For cleaner git-history, rebase ipxe-tpsw-clone and drop all of the development vendor updates
++
+[source,bash]
+----
+git rebase -i develop
+----
++
+`drop` the vendor update commits.
++
+[source,githubexpressionlanguage]
+....
+pick 0581c8a79 normal commit doing normal things
+drop 138664e89 Squashed 'vendor/github.com/Cray-HPE/metal-provision/' changes from b183411c6..226481bdf
+drop 05e9c5eb2 Squashed 'vendor/github.com/Cray-HPE/metal-provision/' changes from 226481bdf..cb38b5ecf
+....
++
+Now vendor update against `main` (or other target base branch)
++
+[source,bash]
+----
+git vendor update ipxe main
+----
+Force update your remote
++
+[source,bash]
+----
+git push origin --force-with-lease
+----
+. Finally, ipxe-tpsw-clone has a sister repository for serving iPXE that it needs to maintain parity with at link:https://github.com/Cray-HPE/metal-ipxe[].
+Make a similar pull-request in that repository, vendoring in the same Cray-HPE/ipxe branch as the ipxe-tpsw-clone pull-request.
+
+=== Patches
+
+Features should be implemented in the form of patch files that can be found in the patches directory. Patches are
+applied to the upstream source at docker build time, such that when the docker build is finished, all affected changes
+to the source should be able to be pre-built using one of the existing pre-compile build tests. This ensures a
+pre-checkout test as well as an opportunity to compile linked objects within the build environment ahead of time.
+
+== Developing in an OSX environment
+
+* If you want to make changes to the ipxe source code, recompile, and boot your image in a VM then read on.
+* Build and run a Docker image with the dependencies for making ipxe.
+* Build the image with `./make-builder-image`. This will build and save the image to your local docker registry.
+* Start the builder container `./start-builder`.
+* Shell into the builder image using `./sh-builder` and from within the container shell run:
+* cd `/home/ipxe`
+* run the appropriate make to build the required ipxe rom (example: `make bin/ipxe.iso`).
+* The build artifacts are available under `$PWD/src/bin` locally outside of the container.
+* The `bin/ipxe.iso` image can be booted from a local VirtualBox VM or from a Craystack compute VM for inital testing
+* To stop and remove the running builder image run `./stop-builder`. This will not delete the $PWD/src directory.
+
+== Embedding a JWT token into the image.
+
+* A JWT token can be included in the image using the make build process. If so the token will be included as a request header (i.e. 'Authorization: Bearer <token>') for all requests from ipxe.
+* To enable this feature pass the `BEARER_TOKEN` argumet to make.
+* Example: `make bin/iso BEARER_TOKEN='eyJhbGciOi ... MdOecaEeA'`
+
+== Other iPXE resources
+
+* For any more detailed instructions, see http://ipxe.org
+
+== Build Helpers
+
+This repo uses some build helpers from the
+link:https://github.com/Cray-HPE/cms-meta-tools[cms-meta-tools] repo. See that repo for more details.
+
+== Local Builds
+
+If you wish to perform a local build, you will first need to clone or copy the contents of the
+cms-meta-tools repo to `./cms_meta_tools` in the same directory as the `Makefile`. When building
+on github, the `cloneCMSMetaTools()` function clones the link:https://github.com/Cray-HPE/cms-meta-tools[cms-meta-tools] repo into that directory.
+
+For a local build, you will also need to manually write the `.version`, `.docker_version` (if this repo
+builds a docker image), and `.chart_version` (if this repo builds a helm chart) files. When building
+on github, this is done by the `setVersionFiles()` function.
+
+== Copyright and License
+
+See each individual file for information on its copyright and license.
