@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2024-08-20
+### Added
+- Refreshed `ipxe` vendor, non-impacting changes. Maintain parity with metal-ipxe
+
+### Changed
+
+- Updated `README.adoc` with new maintenance and usage directions needed after [MTL-2104](https://jira-pro.it.hpe.com:8443/browse/MTL-2104)
+- Changed `README.md` to asciidoc (`README.adoc`)
+
 ## [4.0.0] - 2024-07-17
 ### Added
 
@@ -48,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.4.60] - 2021-08-31
 - Released into csm-1.2
 
-[Unreleased]: https://github.com/Cray-HPE/ipxe-tpsw-clone/compare/v2.4.62...HEAD
+[Unreleased]: https://github.com/Cray-HPE/ipxe-tpsw-clone/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/Cray-HPE/ipxe-tpsw-clone/compare/v3.0.0...v4.0.0
+[3.0.0]: https://github.com/Cray-HPE/ipxe-tpsw-clone/compare/v2.4.62...v3.0.0
 [2.4.62]: https://github.com/Cray-HPE/ipxe-tpsw-clone/compare/v2.4.61...2.4.62
 [2.4.61]: https://github.com/Cray-HPE/ipxe-tpsw-clone/compare/v2.4.60...2.4.61	
