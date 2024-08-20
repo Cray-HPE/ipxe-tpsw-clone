@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Refreshed `ipxe` vendor, non-impacting changes. Maintain parity with metal-ipxe
+
 ### Changed
 
 - Updated `README.adoc` with new maintenance and usage directions needed after [MTL-2104](https://jira-pro.it.hpe.com:8443/browse/MTL-2104)
