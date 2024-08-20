@@ -1,5 +1,9 @@
 #!ipxe
 
+set default-script script.ipxe
+
+set original-filename ${filename}
+
 set print-nics:int8 0
 :nics_scan
 echo === NIC DISCOVERY ==================================
@@ -9,7 +13,7 @@ set idx:int8 0
   echo net${idx} MAC ${net${idx}/mac} PCI.DeviceID ${pci/${net${idx}/busloc}.2.2} PCI.VendorID ${pci/${net${idx}/busloc}.0.2}
   inc idx && goto check
 :checked
-iseq ${print-nics} 1 && prompt Press any key to continue && goto menu || goto menu
+iseq ${print-nics} 1 && prompt Press any key to continue && goto menu ||
 
 echo === LINK ===========================================
 set vidx:int8 0
@@ -17,6 +21,25 @@ set vidx:int8 0
   ifopen net${vidx} && ifstat net${vidx} || echo Failed to open net${vidx}
   inc vidx && goto linkcheck
 :opened
+
+echo === DHCP ===========================================
+# Shut down all interfaces and open them as needed. Sternly prevents iPXE from
+# making bad decisions selecting which interface traffic egresses.
+ifclose
+set vidx:int8 0
+:dhcpcheck isset ${net${vidx}/mac} || goto configured
+  ifopen net${vidx} || echo Failed to open net${vidx}
+  set boot-nic net${vidx} # constantly set this, once DHCP works this'll refer to the right NIC.
+  ifconf -c dhcp --timeout 20000 net${vidx} && goto configured || ifclose net${vidx}
+  inc vidx && goto dhcpcheck
+:configured
+# ipxe option 175 is handed out by an isc-dhcp server when iPXE DHCPs, it will not be given out to normal PXEClient or HTTPClient requests.
+# If the current filename from our DHCP matches the original filename, then we were not handed out ipxe option 175.
+iseq ${original-filename} ${filename} && echo iPXE option 175 was not detected, falling back to filename=${default-script} || echo iPXE option 175 detected: ${filename}
+iseq ${original-filename} ${filename} && set script-name ${default-script} || set script-name ${filename}
+echo Dumping interface status:
+isset ${net${vidx}/ip} && show net${vidx}/ip || echo No interfaces were configured
+ifstat
 
 :menu
 echo === Loading Menu ... ===============================
@@ -49,9 +72,16 @@ cpuid --ext 29 && goto x86_64 || goto i386
   goto start
 
 :start
+set try-ip:int8 1
+set try-hostname:int8 1
+set last-try:int8 0
+set server-ip ${next-server}
+
 menu Metal Pre-Boot :: ${manufacturer} ${product} (${archb}bit)
-item --gap -- ---------------- Choices       ----------------
-item --key n nics     Print (N)IC information
+item --gap -- ---------------- Boot Choices ----------------
+item --key d default        (D)efault next (${server-ip})
+item --key c change         (C)hange next to ...
+item --key n nics           Print (N)IC information
 item --key r reboot         (R)eboot
 item --key e bios           (E)xit to BIOS Menu
 item
@@ -59,7 +89,8 @@ item --gap -- ---------------- Advanced configuration ----------------
 item --key i config   Configure / View (i)PXE settings
 item --key s shell    Enter iPXE (s)hell
 item
-choose --default default target || goto cancel ||
+choose --default default --timeout ${menu-timeout} target || goto cancel ||
+set menu-timeout:int8 0
 goto ${target}
 
 :bios
@@ -69,6 +100,13 @@ exit 0
 :nics
 set print-nics 1
 goto nics_scan
+
+:change
+read script-url
+goto boot
+
+:reboot
+reboot
 
 :config
 config
@@ -83,3 +121,32 @@ goto start
 :cancel
 echo Menu cancelled, dropping to iPXE shell ...
 goto shell
+
+:default
+iseq ${last-try} 1 && goto failed ||
+
+# Keep it secret, keep it safe - stash the next-server in case the lease times out or the NIC resets.
+isset ${crosscert} && set script-url https://${server-ip} || set script-url http://${server-ip}
+
+# Precedence
+# 1. Download a script based on hostname from the DHCP lease.
+# 2. Download a script based on the IP leased from DHCP (as unsigned integer: 10.1.0.21 == 0xa10015).
+# 3. Download a generic script from the root of the next-server address.
+
+iseq ${try-hostname} 1 && set script-url ${script-url}/${hostname}/${script-name} && set try-hostname 0 && goto boot ||
+
+iseq ${try-ip} 1 && set script-url ${script-url}/${${boot-nic}/ip:uint32}/${script-name} && set try-ip 0 && goto boot ||
+
+iseq ${try-ip} 0 && iseq ${try-hostname} 0 && set script-url ${script-url}/${script-name} && set last-try 1 && goto boot ||
+
+# go to menu; reset the timeout and retry all the end points. Allows for a user to interrupt and poke around.
+goto menu
+
+:boot
+echo querying ${script-url}
+chain --autofree --replace ${script-url} || goto default
+
+:failed
+echo Exiting iPXE; depending on vendor this will drop to the next PXE interface or to BIOS.
+echo If BIOS appears next, select either of the DISK entries.
+exit 1
