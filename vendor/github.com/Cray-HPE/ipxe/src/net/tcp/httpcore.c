@@ -672,6 +672,12 @@ int http_open ( struct interface *xfer, struct http_method *method,
 	DBGC2 ( http, "HTTP %p %s://%s%s\n", http, http->uri->scheme,
 		http->request.host, http->request.uri );
 
+	if ( ! uri->host) {
+		DBGC2 ( http, "HTTP %p URI-host: empty.\n", http);,
+	} else {
+		DBGC2 ( http, "HTTP %p URI-host: %s\n", http, uri->host);,
+	}
+
 	/* Open connection */
 	if ( ( rc = http_connect ( &http->conn, uri ) ) != 0 ) {
 		DBGC ( http, "HTTP %p could not connect: %s\n",
