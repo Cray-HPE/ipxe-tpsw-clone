@@ -37,6 +37,10 @@ usage: Used for triaging TCP/IP routing and general connectivity.
 */
 #define PING_CMD
 
+/* Enable GDB debugger */
+#define GDBSERIAL
+#define GDBUDP
+
 /* DHCP config */
 #ifdef DHCP_DISC_START_TIMEOUT_SEC
 #undef DHCP_DISC_START_TIMEOUT_SEC
