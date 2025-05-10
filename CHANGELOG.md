@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2025-05-27
+### Changed
+- CASMTRIAGE-7409 vendor update upstream IPXE code to fix kernel panics on boot
+- Vendor updated to https://github.com/Cray-HPE/ipxe/tree/v1.21.1-644
+
 ## [4.1.1] - 2024-09-17
 
 ### Dependencies
