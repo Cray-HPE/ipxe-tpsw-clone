@@ -23,6 +23,7 @@
 
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
+#include <string.h>
 #include <errno.h>
 #include <initrd.h>
 #include <ipxe/image.h>
@@ -38,21 +39,22 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  */
 
 /** Maximum address available for initrd */
-userptr_t initrd_top;
+static physaddr_t initrd_top;
 
 /** Minimum address available for initrd */
-userptr_t initrd_bottom;
+static physaddr_t initrd_bottom;
 
 /**
  * Squash initrds as high as possible in memory
  *
- * @v top		Highest possible address
- * @ret used		Lowest address used by initrds
+ * @v top		Highest possible physical address
+ * @ret used		Lowest physical address used by initrds
  */
-static userptr_t initrd_squash_high ( userptr_t top ) {
-	userptr_t current = top;
+static physaddr_t initrd_squash_high ( physaddr_t top ) {
+	physaddr_t current = top;
 	struct image *initrd;
 	struct image *highest;
+	void *data;
 	size_t len;
 
 	/* Squash up any initrds already within or below the region */
@@ -61,10 +63,10 @@ static userptr_t initrd_squash_high ( userptr_t top ) {
 		/* Find the highest image not yet in its final position */
 		highest = NULL;
 		for_each_image ( initrd ) {
-			if ( ( userptr_sub ( initrd->data, current ) < 0 ) &&
+			if ( ( virt_to_phys ( initrd->data ) < current ) &&
 			     ( ( highest == NULL ) ||
-			       ( userptr_sub ( initrd->data,
-					       highest->data ) > 0 ) ) ) {
+			       ( virt_to_phys ( initrd->data ) >
+				 virt_to_phys ( highest->data ) ) ) ) {
 				highest = initrd;
 			}
 		}
@@ -74,32 +76,31 @@ static userptr_t initrd_squash_high ( userptr_t top ) {
 		/* Move this image to its final position */
 		len = ( ( highest->len + INITRD_ALIGN - 1 ) &
 			~( INITRD_ALIGN - 1 ) );
-		current = userptr_sub ( current, len );
+		current -= len;
 		DBGC ( &images, "INITRD squashing %s [%#08lx,%#08lx)->"
 		       "[%#08lx,%#08lx)\n", highest->name,
-		       user_to_phys ( highest->data, 0 ),
-		       user_to_phys ( highest->data, highest->len ),
-		       user_to_phys ( current, 0 ),
-		       user_to_phys ( current, highest->len ) );
-		memmove_user ( current, 0, highest->data, 0, highest->len );
-		highest->data = current;
+		       virt_to_phys ( highest->data ),
+		       ( virt_to_phys ( highest->data ) + highest->len ),
+		       current, ( current + highest->len ) );
+		data = phys_to_virt ( current );
+		memmove ( data, highest->data, highest->len );
+		highest->data = data;
 	}
 
 	/* Copy any remaining initrds (e.g. embedded images) to the region */
 	for_each_image ( initrd ) {
-		if ( userptr_sub ( initrd->data, top ) >= 0 ) {
+		if ( virt_to_phys ( initrd->data ) >= top ) {
 			len = ( ( initrd->len + INITRD_ALIGN - 1 ) &
 				~( INITRD_ALIGN - 1 ) );
-			current = userptr_sub ( current, len );
+			current -= len;
 			DBGC ( &images, "INITRD copying %s [%#08lx,%#08lx)->"
 			       "[%#08lx,%#08lx)\n", initrd->name,
-			       user_to_phys ( initrd->data, 0 ),
-			       user_to_phys ( initrd->data, initrd->len ),
-			       user_to_phys ( current, 0 ),
-			       user_to_phys ( current, initrd->len ) );
-			memcpy_user ( current, 0, initrd->data, 0,
-				      initrd->len );
-			initrd->data = current;
+			       virt_to_phys ( initrd->data ),
+			       ( virt_to_phys ( initrd->data ) + initrd->len ),
+			       current, ( current + initrd->len ) );
+			data = phys_to_virt ( current );
+			memcpy ( data, initrd->data, initrd->len );
+			initrd->data = data;
 		}
 	}
 
@@ -115,16 +116,16 @@ static userptr_t initrd_squash_high ( userptr_t top ) {
  * @v free_len		Length of free space
  */
 static void initrd_swap ( struct image *low, struct image *high,
-			  userptr_t free, size_t free_len ) {
+			  void *free, size_t free_len ) {
 	size_t len = 0;
 	size_t frag_len;
 	size_t new_len;
 
 	DBGC ( &images, "INITRD swapping %s [%#08lx,%#08lx)<->[%#08lx,%#08lx) "
-	       "%s\n", low->name, user_to_phys ( low->data, 0 ),
-	       user_to_phys ( low->data, low->len ),
-	       user_to_phys ( high->data, 0 ),
-	       user_to_phys ( high->data, high->len ), high->name );
+	       "%s\n", low->name, virt_to_phys ( low->data ),
+	       ( virt_to_phys ( low->data ) + low->len ),
+	       virt_to_phys ( high->data ),
+	       ( virt_to_phys ( high->data ) + high->len ), high->name );
 
 	/* Round down length of free space */
 	free_len &= ~( INITRD_ALIGN - 1 );
@@ -141,15 +142,16 @@ static void initrd_swap ( struct image *low, struct image *high,
 			    ~( INITRD_ALIGN - 1 ) );
 
 		/* Swap fragments */
-		memcpy_user ( free, 0, high->data, len, frag_len );
-		memmove_user ( low->data, new_len, low->data, len, low->len );
-		memcpy_user ( low->data, len, free, 0, frag_len );
+		memcpy ( free, ( high->data + len ), frag_len );
+		memmove ( ( low->rwdata + new_len ), ( low->data + len ),
+			  low->len );
+		memcpy ( ( low->rwdata + len ), free, frag_len );
 		len = new_len;
 	}
 
 	/* Adjust data pointers */
 	high->data = low->data;
-	low->data = userptr_add ( low->data, len );
+	low->data += len;
 }
 
 /**
@@ -159,11 +161,11 @@ static void initrd_swap ( struct image *low, struct image *high,
  * @v free_len		Length of free space
  * @ret swapped		A pair of initrds was swapped
  */
-static int initrd_swap_any ( userptr_t free, size_t free_len ) {
+static int initrd_swap_any ( void *free, size_t free_len ) {
 	struct image *low;
 	struct image *high;
+	const void *adjacent;
 	size_t padded_len;
-	userptr_t adjacent;
 
 	/* Find any pair of initrds that can be swapped */
 	for_each_image ( low ) {
@@ -171,7 +173,7 @@ static int initrd_swap_any ( userptr_t free, size_t free_len ) {
 		/* Calculate location of adjacent image (if any) */
 		padded_len = ( ( low->len + INITRD_ALIGN - 1 ) &
 			       ~( INITRD_ALIGN - 1 ) );
-		adjacent = userptr_add ( low->data, padded_len );
+		adjacent = ( low->data + padded_len );
 
 		/* Search for adjacent image */
 		for_each_image ( high ) {
@@ -209,17 +211,17 @@ static void initrd_dump ( void ) {
 	/* Dump initrd locations */
 	for_each_image ( initrd ) {
 		DBGC ( &images, "INITRD %s at [%#08lx,%#08lx)\n",
-		       initrd->name, user_to_phys ( initrd->data, 0 ),
-		       user_to_phys ( initrd->data, initrd->len ) );
-		DBGC2_MD5A ( &images, user_to_phys ( initrd->data, 0 ),
-			     user_to_virt ( initrd->data, 0 ), initrd->len );
+		       initrd->name, virt_to_phys ( initrd->data ),
+		       ( virt_to_phys ( initrd->data ) + initrd->len ) );
+		DBGC2_MD5A ( &images, virt_to_phys ( initrd->data ),
+			     initrd->data, initrd->len );
 	}
 }
 
 /**
  * Reshuffle initrds into desired order at top of memory
  *
- * @v bottom		Lowest address available for initrds
+ * @v bottom		Lowest physical address available for initrds
  *
  * After this function returns, the initrds have been rearranged in
  * memory and the external heap structures will have been corrupted.
@@ -227,28 +229,27 @@ static void initrd_dump ( void ) {
  * to the loaded OS kernel; no further execution within iPXE is
  * permitted.
  */
-void initrd_reshuffle ( userptr_t bottom ) {
-	userptr_t top;
-	userptr_t used;
-	userptr_t free;
+void initrd_reshuffle ( physaddr_t bottom ) {
+	physaddr_t top;
+	physaddr_t used;
+	void *free;
 	size_t free_len;
 
 	/* Calculate limits of available space for initrds */
 	top = initrd_top;
-	if ( userptr_sub ( initrd_bottom, bottom ) > 0 )
+	if ( initrd_bottom > bottom )
 		bottom = initrd_bottom;
 
 	/* Debug */
-	DBGC ( &images, "INITRD region [%#08lx,%#08lx)\n",
-	       user_to_phys ( bottom, 0 ), user_to_phys ( top, 0 ) );
+	DBGC ( &images, "INITRD region [%#08lx,%#08lx)\n", bottom, top );
 	initrd_dump();
 
 	/* Squash initrds as high as possible in memory */
 	used = initrd_squash_high ( top );
 
 	/* Calculate available free space */
-	free = bottom;
-	free_len = userptr_sub ( used, free );
+	free = phys_to_virt ( bottom );
+	free_len = ( used - bottom );
 
 	/* Bubble-sort initrds into desired order */
 	while ( initrd_swap_any ( free, free_len ) ) {}
@@ -261,18 +262,18 @@ void initrd_reshuffle ( userptr_t bottom ) {
  * Check that there is enough space to reshuffle initrds
  *
  * @v len		Total length of initrds (including padding)
- * @v bottom		Lowest address available for initrds
+ * @v bottom		Lowest physical address available for initrds
  * @ret rc		Return status code
  */
-int initrd_reshuffle_check ( size_t len, userptr_t bottom ) {
-	userptr_t top;
+int initrd_reshuffle_check ( size_t len, physaddr_t bottom ) {
+	physaddr_t top;
 	size_t available;
 
 	/* Calculate limits of available space for initrds */
 	top = initrd_top;
-	if ( userptr_sub ( initrd_bottom, bottom ) > 0 )
+	if ( initrd_bottom > bottom )
 		bottom = initrd_bottom;
-	available = userptr_sub ( top, bottom );
+	available = ( top - bottom );
 
 	/* Allow for a sensible minimum amount of free space */
 	len += INITRD_MIN_FREE_LEN;
@@ -286,6 +287,7 @@ int initrd_reshuffle_check ( size_t len, userptr_t bottom ) {
  *
  */
 static void initrd_startup ( void ) {
+	void *bottom;
 	size_t len;
 
 	/* Record largest memory block available.  Do this after any
@@ -295,8 +297,9 @@ static void initrd_startup ( void ) {
 	 * but before any allocations for downloaded images (which we
 	 * can safely reuse when rearranging).
 	 */
-	len = largest_memblock ( &initrd_bottom );
-	initrd_top = userptr_add ( initrd_bottom, len );
+	len = largest_memblock ( &bottom );
+	initrd_bottom = virt_to_phys ( bottom );
+	initrd_top = ( initrd_bottom + len );
 }
 
 /** initrd startup function */

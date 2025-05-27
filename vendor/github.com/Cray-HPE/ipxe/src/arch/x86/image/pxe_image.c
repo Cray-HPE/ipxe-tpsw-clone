@@ -30,10 +30,10 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  *
  */
 
+#include <string.h>
 #include <pxe.h>
 #include <pxe_call.h>
 #include <pic8259.h>
-#include <ipxe/uaccess.h>
 #include <ipxe/image.h>
 #include <ipxe/segment.h>
 #include <ipxe/netdevice.h>
@@ -54,7 +54,7 @@ const char *pxe_cmdline;
  * @ret rc		Return status code
  */
 static int pxe_exec ( struct image *image ) {
-	userptr_t buffer = real_to_user ( 0, 0x7c00 );
+	void *buffer = real_to_virt ( 0, 0x7c00 );
 	struct net_device *netdev;
 	int rc;
 
@@ -66,7 +66,7 @@ static int pxe_exec ( struct image *image ) {
 	}
 
 	/* Copy image to segment */
-	memcpy_user ( buffer, 0, image->data, 0, image->len );
+	memcpy ( buffer, image->data, image->len );
 
 	/* Arbitrarily pick the most recently opened network device */
 	if ( ( netdev = last_opened_netdev() ) == NULL ) {
@@ -142,7 +142,7 @@ int pxe_probe ( struct image *image ) {
  * @ret rc		Return status code
  */
 int pxe_probe_no_mz ( struct image *image ) {
-	uint16_t magic;
+	const uint16_t *magic;
 	int rc;
 
 	/* Probe PXE image */
@@ -152,9 +152,9 @@ int pxe_probe_no_mz ( struct image *image ) {
 	/* Reject image with an "MZ" signature which may indicate an
 	 * EFI image incorrectly handed out to a BIOS system.
 	 */
-	if ( image->len >= sizeof ( magic ) ) {
-		copy_from_user ( &magic, image->data, 0, sizeof ( magic ) );
-		if ( magic == cpu_to_le16 ( EFI_IMAGE_DOS_SIGNATURE ) ) {
+	if ( image->len >= sizeof ( *magic ) ) {
+		magic = image->data;
+		if ( *magic == cpu_to_le16 ( EFI_IMAGE_DOS_SIGNATURE ) ) {
 			DBGC ( image, "IMAGE %p may be an EFI image\n",
 			       image );
 			return -ENOTTY;

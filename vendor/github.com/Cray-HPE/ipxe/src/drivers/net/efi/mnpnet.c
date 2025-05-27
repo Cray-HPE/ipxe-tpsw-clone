@@ -367,14 +367,9 @@ static struct net_device_operations mnpnet_operations = {
  * @ret rc		Return status code
  */
 int mnpnet_start ( struct efi_device *efidev ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	EFI_HANDLE device = efidev->device;
 	EFI_GUID *binding = &efi_managed_network_service_binding_protocol_guid;
 	EFI_SIMPLE_NETWORK_MODE mode;
-	union {
-		EFI_MANAGED_NETWORK_PROTOCOL *mnp;
-		void *interface;
-	} u;
 	struct net_device *netdev;
 	struct mnp_nic *mnp;
 	EFI_STATUS efirc;
@@ -408,18 +403,13 @@ int mnpnet_start ( struct efi_device *efidev ) {
 	}
 
 	/* Open MNP protocol */
-	if ( ( efirc = bs->OpenProtocol ( efidev->child,
-					  &efi_managed_network_protocol_guid,
-					  &u.interface, efi_image_handle,
-					  efidev->child,
-					  ( EFI_OPEN_PROTOCOL_BY_DRIVER |
-					    EFI_OPEN_PROTOCOL_EXCLUSIVE )))!=0){
-		rc = -EEFI ( efirc );
+	if ( ( rc = efi_open_by_driver ( efidev->child,
+					 &efi_managed_network_protocol_guid,
+					 &mnp->mnp ) ) != 0 ) {
 		DBGC ( mnp, "MNP %s could not open MNP protocol: %s\n",
 		       efi_handle_name ( device ), strerror ( rc ) );
 		goto err_open;
 	}
-	mnp->mnp = u.mnp;
 
 	/* Get configuration */
 	efirc = mnp->mnp->GetModeData ( mnp->mnp, NULL, &mode );
@@ -464,8 +454,8 @@ int mnpnet_start ( struct efi_device *efidev ) {
  err_ll_addr_len:
  err_hw_addr_len:
  err_mode:
-	bs->CloseProtocol ( efidev->child, &efi_managed_network_protocol_guid,
-			    efi_image_handle, efidev->child );
+	efi_close_by_driver ( efidev->child,
+			      &efi_managed_network_protocol_guid );
  err_open:
 	efi_service_del ( device, binding, efidev->child );
  err_service:
@@ -482,7 +472,6 @@ int mnpnet_start ( struct efi_device *efidev ) {
  * @v efidev		EFI device
   */
 void mnpnet_stop ( struct efi_device *efidev ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	EFI_GUID *binding = &efi_managed_network_service_binding_protocol_guid;
 	struct net_device *netdev = efidev_get_drvdata ( efidev );
 	struct mnp_nic *mnp = netdev->priv;
@@ -491,8 +480,8 @@ void mnpnet_stop ( struct efi_device *efidev ) {
 	unregister_netdev ( netdev );
 
 	/* Close MNP protocol */
-	bs->CloseProtocol ( efidev->child, &efi_managed_network_protocol_guid,
-			    efi_image_handle, efidev->child );
+	efi_close_by_driver ( efidev->child,
+			      &efi_managed_network_protocol_guid );
 
 	/* Remove MNP child (unless whole system shutdown is in progress) */
 	if ( ! efi_shutdown_in_progress )

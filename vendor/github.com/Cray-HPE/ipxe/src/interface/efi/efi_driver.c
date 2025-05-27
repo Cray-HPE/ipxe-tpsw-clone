@@ -68,45 +68,32 @@ static int efi_driver_disconnecting;
  * @ret efidev		EFI device, or NULL on error
  */
 struct efi_device * efidev_alloc ( EFI_HANDLE device ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	struct efi_device *efidev = NULL;
-	union {
-		EFI_DEVICE_PATH_PROTOCOL *path;
-		void *interface;
-	} path;
+	EFI_DEVICE_PATH_PROTOCOL *path;
 	EFI_DEVICE_PATH_PROTOCOL *path_end;
 	size_t path_len;
-	EFI_STATUS efirc;
 	int rc;
 
 	/* Open device path */
-	if ( ( efirc = bs->OpenProtocol ( device,
-					  &efi_device_path_protocol_guid,
-					  &path.interface, efi_image_handle,
-					  device,
-					  EFI_OPEN_PROTOCOL_GET_PROTOCOL ))!=0){
-		rc = -EEFI ( efirc );
+	if ( ( rc = efi_open ( device, &efi_device_path_protocol_guid,
+			       &path ) ) != 0 ) {
 		DBGC ( device, "EFIDRV %s could not open device path: %s\n",
 		       efi_handle_name ( device ), strerror ( rc ) );
-		goto err_open_path;
+		return NULL;
 	}
-	path_len = ( efi_path_len ( path.path ) + sizeof ( *path_end ) );
+	path_len = ( efi_path_len ( path ) + sizeof ( *path_end ) );
 
 	/* Allocate and initialise structure */
 	efidev = zalloc ( sizeof ( *efidev ) + path_len );
 	if ( ! efidev )
-		goto err_alloc;
+		return NULL;
 	efidev->device = device;
 	efidev->dev.desc.bus_type = BUS_TYPE_EFI;
 	efidev->path = ( ( ( void * ) efidev ) + sizeof ( *efidev ) );
-	memcpy ( efidev->path, path.path, path_len );
+	memcpy ( efidev->path, path, path_len );
 	INIT_LIST_HEAD ( &efidev->dev.children );
 	list_add ( &efidev->dev.siblings, &efi_devices );
 
- err_alloc:
-	bs->CloseProtocol ( device, &efi_device_path_protocol_guid,
-			    efi_image_handle, device );
- err_open_path:
 	return efidev;
 }
 
@@ -180,6 +167,7 @@ static EFI_STATUS EFIAPI
 efi_driver_supported ( EFI_DRIVER_BINDING_PROTOCOL *driver __unused,
 		       EFI_HANDLE device, EFI_DEVICE_PATH_PROTOCOL *child ) {
 	struct efi_driver *efidrv;
+	unsigned int count;
 	int rc;
 
 	DBGCP ( device, "EFIDRV %s DRIVER_SUPPORTED",
@@ -195,18 +183,24 @@ efi_driver_supported ( EFI_DRIVER_BINDING_PROTOCOL *driver __unused,
 		return EFI_ALREADY_STARTED;
 	}
 
-	/* Look for a driver claiming to support this device */
+	/* Count drivers claiming to support this device */
+	count = 0;
 	for_each_table_entry ( efidrv, EFI_DRIVERS ) {
 		if ( ( rc = efidrv->supported ( device ) ) == 0 ) {
 			DBGC ( device, "EFIDRV %s has driver \"%s\"\n",
 			       efi_handle_name ( device ), efidrv->name );
-			return 0;
+			count++;
 		}
 	}
-	DBGCP ( device, "EFIDRV %s has no driver\n",
-		efi_handle_name ( device ) );
 
-	return EFI_UNSUPPORTED;
+	/* Check that we have at least one driver */
+	if ( ! count ) {
+		DBGCP ( device, "EFIDRV %s has no driver\n",
+			efi_handle_name ( device ) );
+		return EFI_UNSUPPORTED;
+	}
+
+	return 0;
 }
 
 /**
@@ -320,7 +314,7 @@ efi_driver_stop ( EFI_DRIVER_BINDING_PROTOCOL *driver __unused,
 	if ( ! efidev ) {
 		DBGCP ( device, "EFIDRV %s is not started\n",
 			efi_handle_name ( device ) );
-		return EFI_DEVICE_ERROR;
+		return 0;
 	}
 
 	/* Raise TPL */
@@ -375,24 +369,17 @@ static EFI_STATUS EFIAPI
 efi_driver_controller_name ( EFI_COMPONENT_NAME2_PROTOCOL *wtf __unused,
 			     EFI_HANDLE device, EFI_HANDLE child,
 			     CHAR8 *language, CHAR16 **controller_name ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
-	union {
-		EFI_COMPONENT_NAME2_PROTOCOL *name2;
-		void *interface;
-	} name2;
-	EFI_STATUS efirc;
+	EFI_COMPONENT_NAME2_PROTOCOL *name2;
+	int rc;
 
 	/* Delegate to the EFI_COMPONENT_NAME2_PROTOCOL instance
 	 * installed on child handle, if present.
 	 */
 	if ( ( child != NULL ) &&
-	     ( ( efirc = bs->OpenProtocol (
-			  child, &efi_component_name2_protocol_guid,
-			  &name2.interface, NULL, NULL,
-			  EFI_OPEN_PROTOCOL_GET_PROTOCOL ) ) == 0 ) ) {
-		return name2.name2->GetControllerName ( name2.name2, device,
-							child, language,
-							controller_name );
+	     ( ( rc = efi_open ( child, &efi_component_name2_protocol_guid,
+				 &name2 ) ) == 0 ) ) {
+		return name2->GetControllerName ( name2, device, child,
+						  language, controller_name );
 	}
 
 	/* Otherwise, let EFI use the default Device Path Name */
@@ -455,6 +442,70 @@ void efi_driver_uninstall ( void ) {
 }
 
 /**
+ * Try to disconnect an existing EFI driver
+ *
+ * @v device		EFI device
+ * @v protocol		Protocol GUID
+ * @ret rc		Return status code
+ */
+int efi_driver_exclude ( EFI_HANDLE device, EFI_GUID *protocol ) {
+	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
+	EFI_OPEN_PROTOCOL_INFORMATION_ENTRY *openers;
+	EFI_OPEN_PROTOCOL_INFORMATION_ENTRY *opener;
+	EFI_HANDLE driver;
+	UINTN count;
+	unsigned int i;
+	EFI_STATUS efirc;
+	int rc;
+
+	/* Retrieve list of openers */
+	if ( ( efirc = bs->OpenProtocolInformation ( device, protocol, &openers,
+						     &count ) ) != 0 ) {
+		rc = -EEFI ( efirc );
+		DBGC ( device, "EFIDRV %s could not list %s openers: %s\n",
+		       efi_handle_name ( device ), efi_guid_ntoa ( protocol ),
+		       strerror ( rc ) );
+		goto err_list;
+	}
+
+	/* Identify BY_DRIVER opener */
+	driver = NULL;
+	for ( i = 0 ; i < count ; i++ ) {
+		opener = &openers[i];
+		if ( opener->Attributes & EFI_OPEN_PROTOCOL_BY_DRIVER ) {
+			driver = opener->AgentHandle;
+			break;
+		}
+	}
+
+	/* Try to disconnect driver */
+	DBGC ( device, "EFIDRV %s disconnecting %s drivers\n",
+	       efi_handle_name ( device ), efi_guid_ntoa ( protocol ) );
+	if ( driver ) {
+		DBGC ( device, "EFIDRV %s disconnecting %s driver ",
+		       efi_handle_name ( device ), efi_guid_ntoa ( protocol ) );
+		DBGC ( device, "%s\n", efi_handle_name ( driver ) );
+		if ( ( efirc = bs->DisconnectController ( device, driver,
+							  NULL ) ) != 0 ) {
+			rc = -EEFI ( efirc );
+			DBGC ( device, "EFIDRV %s could not disconnect ",
+			       efi_handle_name ( device ) );
+			DBGC ( device, "%s: %s\n",
+			       efi_handle_name ( driver ), strerror ( rc ) );
+			goto err_disconnect;
+		}
+	}
+
+	/* Success */
+	rc = 0;
+
+ err_disconnect:
+	bs->FreePool ( openers );
+ err_list:
+	return rc;
+}
+
+/**
  * Try to connect EFI driver
  *
  * @v device		EFI device
@@ -464,6 +515,7 @@ static int efi_driver_connect ( EFI_HANDLE device ) {
 	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
 	EFI_HANDLE drivers[2] =
 		{ efi_driver_binding.DriverBindingHandle, NULL };
+	struct efi_driver *efidrv;
 	EFI_STATUS efirc;
 	int rc;
 
@@ -481,13 +533,17 @@ static int efi_driver_connect ( EFI_HANDLE device ) {
 	DBGC ( device, "EFIDRV %s disconnecting existing drivers\n",
 	       efi_handle_name ( device ) );
 	efi_driver_disconnecting = 1;
-	if ( ( efirc = bs->DisconnectController ( device, NULL,
-						  NULL ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFIDRV %s could not disconnect existing "
-		       "drivers: %s\n", efi_handle_name ( device ),
-		       strerror ( rc ) );
-		/* Ignore the error and attempt to connect our drivers */
+	for_each_table_entry_reverse ( efidrv, EFI_DRIVERS ) {
+		if ( ! efidrv->exclude )
+			continue;
+		if ( ( rc = efidrv->supported ( device ) ) != 0 )
+			continue;
+		if ( ( rc = efidrv->exclude ( device ) ) != 0 ) {
+			DBGC ( device, "EFIDRV %s could not disconnect "
+			       "drivers: %s\n", efi_handle_name ( device ),
+			       strerror ( rc ) );
+			/* Ignore the error and attempt to connect anyway */
+		}
 	}
 	efi_driver_disconnecting = 0;
 	DBGC2 ( device, "EFIDRV %s after disconnecting:\n",
