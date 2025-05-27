@@ -34,6 +34,13 @@ struct efi_driver {
 	/** Name */
 	const char *name;
 	/**
+	 * Exclude existing drivers
+	 *
+	 * @v device		EFI device handle
+	 * @ret rc		Return status code
+	 */
+	int ( * exclude ) ( EFI_HANDLE device );
+	/**
 	 * Check if driver supports device
 	 *
 	 * @v device		EFI device handle
@@ -62,8 +69,10 @@ struct efi_driver {
 #define __efi_driver( order ) __table_entry ( EFI_DRIVERS, order )
 
 #define EFI_DRIVER_EARLY	01	/**< Early drivers */
-#define EFI_DRIVER_NORMAL	02	/**< Normal drivers */
-#define EFI_DRIVER_LATE		03	/**< Late drivers */
+#define EFI_DRIVER_HARDWARE	02	/**< Hardware drivers */
+#define EFI_DRIVER_NII		03	/**< NII protocol drivers */
+#define EFI_DRIVER_SNP		04	/**< SNP protocol drivers */
+#define EFI_DRIVER_MNP		05	/**< MNP protocol drivers */
 
 /**
  * Set EFI driver-private data
@@ -91,6 +100,7 @@ extern void efidev_free ( struct efi_device *efidev );
 extern struct efi_device * efidev_parent ( struct device *dev );
 extern int efi_driver_install ( void );
 extern void efi_driver_uninstall ( void );
+extern int efi_driver_exclude ( EFI_HANDLE device, EFI_GUID *protocol );
 extern int efi_driver_connect_all ( void );
 extern void efi_driver_disconnect_all ( void );
 extern void efi_driver_reconnect_all ( void );

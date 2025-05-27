@@ -30,6 +30,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  *
  */
 
+#include <string.h>
 #include <errno.h>
 #include <ipxe/uaccess.h>
 #include <ipxe/io.h>
@@ -57,11 +58,11 @@ struct errortab segment_errors[] __errortab = {
  * @v memsz		Size of the segment
  * @ret rc		Return status code
  */
-int prep_segment ( userptr_t segment, size_t filesz, size_t memsz ) {
+int prep_segment ( void *segment, size_t filesz, size_t memsz ) {
 	struct memory_map memmap;
-	physaddr_t start = user_to_phys ( segment, 0 );
-	physaddr_t mid = user_to_phys ( segment, filesz );
-	physaddr_t end = user_to_phys ( segment, memsz );
+	physaddr_t start = virt_to_phys ( segment );
+	physaddr_t mid = ( start + filesz );
+	physaddr_t end = ( start + memsz );
 	unsigned int i;
 
 	DBG ( "Preparing segment [%lx,%lx,%lx)\n", start, mid, end );
@@ -83,7 +84,7 @@ int prep_segment ( userptr_t segment, size_t filesz, size_t memsz ) {
 		if ( ( start >= memmap.regions[i].start ) &&
 		     ( end <= memmap.regions[i].end ) ) {
 			/* Found valid region: zero bss and return */
-			memset_user ( segment, filesz, 0, ( memsz - filesz ) );
+			memset ( ( segment + filesz ), 0, ( memsz - filesz ) );
 			return 0;
 		}
 	}

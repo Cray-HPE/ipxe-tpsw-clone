@@ -45,44 +45,31 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  */
 int efi_service_add ( EFI_HANDLE service, EFI_GUID *binding,
 		      EFI_HANDLE *handle ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
-	union {
-		EFI_SERVICE_BINDING_PROTOCOL *sb;
-		void *interface;
-	} u;
+	EFI_SERVICE_BINDING_PROTOCOL *sb;
 	EFI_STATUS efirc;
 	int rc;
 
 	/* Open service binding protocol */
-	if ( ( efirc = bs->OpenProtocol ( service, binding, &u.interface,
-					  efi_image_handle, service,
-					  EFI_OPEN_PROTOCOL_GET_PROTOCOL ))!=0){
-		rc = -EEFI ( efirc );
+	if ( ( rc = efi_open ( service, binding, &sb ) ) != 0 ) {
 		DBGC ( service, "EFISVC %s cannot open %s binding: %s\n",
 		       efi_handle_name ( service ), efi_guid_ntoa ( binding ),
 		       strerror ( rc ) );
-		goto err_open;
+		return rc;
 	}
 
 	/* Create child handle */
-	if ( ( efirc = u.sb->CreateChild ( u.sb, handle ) ) != 0 ) {
+	if ( ( efirc = sb->CreateChild ( sb, handle ) ) != 0 ) {
 		rc = -EEFI ( efirc );
 		DBGC ( service, "EFISVC %s could not create %s child: %s\n",
 		       efi_handle_name ( service ), efi_guid_ntoa ( binding ),
 		       strerror ( rc ) );
-		goto err_create;
+		return rc;
 	}
 
-	/* Success */
-	rc = 0;
 	DBGC ( service, "EFISVC %s created %s child ",
 	       efi_handle_name ( service ), efi_guid_ntoa ( binding ) );
 	DBGC ( service, "%s\n", efi_handle_name ( *handle ) );
-
- err_create:
-	bs->CloseProtocol ( service, binding, efi_image_handle, service );
- err_open:
-	return rc;
+	return 0;
 }
 
 /**
@@ -95,11 +82,7 @@ int efi_service_add ( EFI_HANDLE service, EFI_GUID *binding,
  */
 int efi_service_del ( EFI_HANDLE service, EFI_GUID *binding,
 		      EFI_HANDLE handle ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
-	union {
-		EFI_SERVICE_BINDING_PROTOCOL *sb;
-		void *interface;
-	} u;
+	EFI_SERVICE_BINDING_PROTOCOL *sb;
 	EFI_STATUS efirc;
 	int rc;
 
@@ -108,31 +91,22 @@ int efi_service_del ( EFI_HANDLE service, EFI_GUID *binding,
 	DBGC ( service, "%s\n", efi_handle_name ( handle ) );
 
 	/* Open service binding protocol */
-	if ( ( efirc = bs->OpenProtocol ( service, binding, &u.interface,
-					  efi_image_handle, service,
-					  EFI_OPEN_PROTOCOL_GET_PROTOCOL ))!=0){
-		rc = -EEFI ( efirc );
+	if ( ( rc = efi_open ( service, binding, &sb ) ) != 0 ) {
 		DBGC ( service, "EFISVC %s cannot open %s binding: %s\n",
 		       efi_handle_name ( service ), efi_guid_ntoa ( binding ),
 		       strerror ( rc ) );
-		goto err_open;
+		return rc;
 	}
 
 	/* Destroy child handle */
-	if ( ( efirc = u.sb->DestroyChild ( u.sb, handle ) ) != 0 ) {
+	if ( ( efirc = sb->DestroyChild ( sb, handle ) ) != 0 ) {
 		rc = -EEFI ( efirc );
 		DBGC ( service, "EFISVC %s could not destroy %s child ",
 		       efi_handle_name ( service ), efi_guid_ntoa ( binding ) );
 		DBGC ( service, "%s: %s\n",
 		       efi_handle_name ( handle ), strerror ( rc ) );
-		goto err_destroy;
+		return rc;
 	}
 
-	/* Success */
-	rc = 0;
-
- err_destroy:
-	bs->CloseProtocol ( service, binding, efi_image_handle, service );
- err_open:
-	return rc;
+	return 0;
 }

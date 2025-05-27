@@ -507,7 +507,7 @@ http_content_buffer ( struct http_transaction *http ) {
 __weak int http_block_read ( struct http_transaction *http __unused,
 			     struct interface *data __unused,
 			     uint64_t lba __unused, unsigned int count __unused,
-			     userptr_t buffer __unused, size_t len __unused ) {
+			     void *buffer __unused, size_t len __unused ) {
 
 	return -ENOTSUP;
 }
@@ -1119,7 +1119,8 @@ static int http_tx_request ( struct http_transaction *http ) {
 	}
 
 	/* Allocate I/O buffer */
-	iobuf = alloc_iob ( len + 1 /* NUL */ + http->request.content.len );
+	iobuf = xfer_alloc_iob ( &http->conn, ( len + 1 /* NUL */ +
+						http->request.content.len ) );
 	if ( ! iobuf ) {
 		rc = -ENOMEM;
 		goto err_alloc;

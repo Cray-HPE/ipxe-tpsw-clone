@@ -9,7 +9,7 @@
 
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
-#define UACCESS_EFI
+#define UACCESS_FLAT
 #define IOMAP_VIRT
 #define PCIAPI_EFI
 #define DMAAPI_OP
@@ -26,6 +26,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #define ACPI_EFI
 #define FDT_EFI
 #define MPAPI_EFI
+#define NAP_EFI
 
 #define	NET_PROTO_IPV6		/* IPv6 protocol */
 #define	NET_PROTO_LLDP		/* Link Layer Discovery protocol */
@@ -34,6 +35,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #define	IMAGE_EFI		/* EFI image support */
 #define	IMAGE_SCRIPT		/* iPXE script image support */
+#define IMAGE_EFISIG		/* EFI signature list support */
 
 #define	SANBOOT_PROTO_ISCSI	/* iSCSI protocol */
 #define	SANBOOT_PROTO_AOE	/* AoE protocol */
@@ -51,9 +53,10 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #define EFI_SETTINGS		/* EFI variable settings */
 
+#define CERTS_EFI		/* EFI certificate sources */
+
 #if defined ( __i386__ ) || defined ( __x86_64__ )
 #define IOAPI_X86
-#define NAP_EFIX86
 #define ENTROPY_RDRAND
 #define	CPUID_CMD		/* x86 CPU feature detection command */
 #define	UNSAFE_STD		/* Avoid setting direction flag */
@@ -61,16 +64,21 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #if defined ( __arm__ ) || defined ( __aarch64__ )
 #define IOAPI_ARM
-#define NAP_EFIARM
+#define FDT_CMD
 #endif
 
 #if defined ( __aarch64__ )
 #define	IMAGE_GZIP		/* GZIP image support */
+#define FDT_CMD
 #endif
 
 #if defined ( __loongarch__ )
 #define IOAPI_LOONG64
-#define NAP_EFILOONG64
+#endif
+
+#if defined ( __riscv )
+#define IOAPI_RISCV
+#define FDT_CMD
 #endif
 
 #endif /* CONFIG_DEFAULTS_EFI_H */
