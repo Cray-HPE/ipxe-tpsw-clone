@@ -25,11 +25,13 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <ipxe/dhcppkt.h>
 #include <ipxe/init.h>
 #include <ipxe/netdevice.h>
 #include <ipxe/vlan.h>
+#include <ipxe/uaccess.h>
 #include <ipxe/cachedhcp.h>
 
 /** @file
@@ -198,7 +200,7 @@ static int cachedhcp_apply ( struct cached_dhcp_packet *cache,
  * @ret rc		Return status code
  */
 int cachedhcp_record ( struct cached_dhcp_packet *cache, unsigned int vlan,
-		       userptr_t data, size_t max_len ) {
+		       const void *data, size_t max_len ) {
 	struct dhcp_packet *dhcppkt;
 	struct dhcp_packet *tmp;
 	struct dhcphdr *dhcphdr;
@@ -216,7 +218,7 @@ int cachedhcp_record ( struct cached_dhcp_packet *cache, unsigned int vlan,
 		return -ENOMEM;
 	}
 	dhcphdr = ( ( ( void * ) dhcppkt ) + sizeof ( *dhcppkt ) );
-	copy_from_user ( dhcphdr, data, 0, max_len );
+	memcpy ( dhcphdr, data, max_len );
 	dhcppkt_init ( dhcppkt, dhcphdr, max_len );
 
 	/* Shrink packet to required length.  If reallocation fails,
@@ -251,7 +253,7 @@ int cachedhcp_record ( struct cached_dhcp_packet *cache, unsigned int vlan,
 
 	/* Store as cached packet */
 	DBGC ( colour, "CACHEDHCP %s at %#08lx+%#zx/%#zx\n", cache->name,
-	       user_to_phys ( data, 0 ), len, max_len );
+	       virt_to_phys ( data ), len, max_len );
 	cache->dhcppkt = dhcppkt;
 	cache->vlan = vlan;
 

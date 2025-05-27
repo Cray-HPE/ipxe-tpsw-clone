@@ -24,6 +24,7 @@
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <getopt.h>
+#include <ipxe/uaccess.h>
 #include <ipxe/command.h>
 #include <ipxe/parseopt.h>
 #include <usr/imgmgmt.h>
@@ -81,7 +82,7 @@ static int imgmem_exec ( int argc, char **argv ) {
 		return rc;
 
 	/* Create image */
-	if ( ( rc = imgmem ( opts.name, phys_to_user ( data ), len ) ) != 0 )
+	if ( ( rc = imgmem ( opts.name, phys_to_virt ( data ), len ) ) != 0 )
 		return rc;
 
 	return 0;
