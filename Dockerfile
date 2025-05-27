@@ -1,7 +1,7 @@
 #
 # MIT License
 #
-# (C) Copyright 2018, 2021-2024 Hewlett Packard Enterprise Development LP
+# (C) Copyright 2018, 2021-2025 Hewlett Packard Enterprise Development LP
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -28,13 +28,13 @@
 
 ARG UPSTREAM=artifactory.algol60.net/docker.io
 ARG BASE_IMAGE_DISTRO=ubuntu
-ARG BASE_IMAGE_TAG=20.04
+ARG BASE_IMAGE_TAG=24.04
 ARG BASE_IMAGE=$UPSTREAM/$BASE_IMAGE_DISTRO:$BASE_IMAGE_TAG
 
 FROM $BASE_IMAGE as base
 LABEL vendor="Cray, Inc."
 RUN apt -y update && \
-    apt -y install gcc make gcc-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
+    apt -y install gcc gcc-14 make gcc-aarch64-linux-gnu gcc-14-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
                    genisoimage xz-utils libc-dev bash git && \
     apt-get upgrade -y && apt full-upgrade -y
 
@@ -61,6 +61,8 @@ WORKDIR /ipxe
 # before the building container image enters production.
 FROM base as precompile
 COPY etc /sample
+ARG CC=gcc-14
+
 RUN make CONFIG=hpc bin/undionly.kpxe
 RUN make CONFIG=hpc bin/ipxe.usb
 RUN make CONFIG=hpc bin-x86_64-efi/ipxe.efi
@@ -68,7 +70,7 @@ RUN make CONFIG=hpc bin-x86_64-efi/ipxe.efi
 RUN cp /sample/cert_sample /ipxe/cert_sample && \
     cp /sample/bss_sample_script.txt /ipxe/bss_sample_script.txt && \
     export TOKEN=$(cat /sample/s3_sample_jwt) && \
-    make CONFIG=hpc bin-x86_64-efi/ipxe.efi \
+    make CC=$CC CONFIG=hpc bin-x86_64-efi/ipxe.efi \
         DEBUG=httpcore,x509,efi_time \
         CERT=cert_sample TRUST=cert_sample \
         EMBED=bss_sample_script.txt && \
@@ -79,11 +81,10 @@ RUN cp /sample/cert_sample /ipxe/cert_sample && \
 RUN cp /sample/cert_sample /ipxe/cert_sample && \
     cp /sample/bss_sample_script.txt /ipxe/bss_sample_script.txt && \
     export TOKEN=$(cat /sample/s3_sample_jwt) && \
-    make CONFIG=hpc CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 bin-arm64-efi/ipxe.efi \
+    make CC=aarch64-linux-gnu-$CC CONFIG=hpc CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 bin-arm64-efi/ipxe.efi \
         DEBUG=httpcore,x509,efi_time \
         CERT=cert_sample TRUST=cert_sample \
         EMBED=bss_sample_script.txt && \
         BEARER_TOKEN=$TOKEN && \
         S3_HOST=$S3_HOST && \
     rm /ipxe/cert_sample /ipxe/bss_sample_script.txt /ipxe/bin-arm64-efi/ipxe.efi
-

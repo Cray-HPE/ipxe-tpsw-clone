@@ -10,6 +10,7 @@
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
+#include <ipxe/image.h>
 
 struct net_device;
 
@@ -72,17 +73,22 @@ struct fdt_prop {
 /** Alignment of structure block */
 #define FDT_STRUCTURE_ALIGN ( sizeof ( fdt_token_t ) )
 
+/** Maximum alignment of any block */
+#define FDT_MAX_ALIGN 8
+
 /** A device tree */
 struct fdt {
 	/** Tree data */
 	union {
 		/** Tree header */
-		const struct fdt_header *hdr;
+		struct fdt_header *hdr;
 		/** Raw data */
-		const void *raw;
+		void *raw;
 	};
 	/** Length of tree */
 	size_t len;
+	/** Used length of tree */
+	size_t used;
 	/** Offset to structure block */
 	unsigned int structure;
 	/** Length of structure block */
@@ -91,12 +97,58 @@ struct fdt {
 	unsigned int strings;
 	/** Length of strings block */
 	size_t strings_len;
+	/** Offset to memory reservation block */
+	unsigned int reservations;
+	/** Reallocate device tree
+	 *
+	 * @v fdt		Device tree
+	 * @v len		New length
+	 * @ret rc		Return status code
+	 */
+	int ( * realloc ) ( struct fdt *fdt, size_t len );
 };
 
-extern int fdt_path ( const char *path, unsigned int *offset );
-extern int fdt_alias ( const char *name, unsigned int *offset );
-extern const char * fdt_string ( unsigned int offset, const char *name );
-extern int fdt_mac ( unsigned int offset, struct net_device *netdev );
-extern int register_fdt ( const struct fdt_header *hdr );
+/** A device tree token descriptor */
+struct fdt_descriptor {
+	/** Offset within structure block */
+	unsigned int offset;
+	/** Next offset within structure block */
+	unsigned int next;
+	/** Node or property name (if applicable) */
+	const char *name;
+	/** Property data (if applicable) */
+	const void *data;
+	/** Length of property data (if applicable) */
+	size_t len;
+	/** Depth change */
+	int depth;
+};
+
+extern struct image_tag fdt_image __image_tag;
+extern struct fdt sysfdt;
+
+extern int fdt_describe ( struct fdt *fdt, unsigned int offset,
+			  struct fdt_descriptor *desc );
+extern int fdt_path ( struct fdt *fdt, const char *path,
+		      unsigned int *offset );
+extern int fdt_alias ( struct fdt *fdt, const char *name,
+		       unsigned int *offset );
+extern const char * fdt_strings ( struct fdt *fdt, unsigned int offset,
+				  const char *name, unsigned int *count );
+extern const char * fdt_string ( struct fdt *fdt, unsigned int offset,
+				 const char *name );
+extern int fdt_cells ( struct fdt *fdt, unsigned int offset, const char *name,
+		       unsigned int index, unsigned int count,
+		       uint64_t *value );
+extern int fdt_u64 ( struct fdt *fdt, unsigned int offset, const char *name,
+		     uint64_t *value );
+extern int fdt_u32 ( struct fdt *fdt, unsigned int offset, const char *name,
+		     uint32_t *value );
+extern int fdt_mac ( struct fdt *fdt, unsigned int offset,
+		     struct net_device *netdev );
+extern int fdt_parse ( struct fdt *fdt, struct fdt_header *hdr,
+		       size_t max_len );
+extern int fdt_create ( struct fdt_header **hdr, const char *cmdline );
+extern void fdt_remove ( struct fdt_header *hdr );
 
 #endif /* _IPXE_FDT_H */

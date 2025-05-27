@@ -57,17 +57,19 @@ static int nii_supported ( EFI_HANDLE device ) {
 }
 
 /** EFI SNP driver */
-struct efi_driver snp_driver __efi_driver ( EFI_DRIVER_NORMAL ) = {
+struct efi_driver snp_driver __efi_driver ( EFI_DRIVER_SNP ) = {
 	.name = "SNP",
 	.supported = snp_supported,
+	.exclude = snpnet_exclude,
 	.start = snpnet_start,
 	.stop = snpnet_stop,
 };
 
 /** EFI NII driver */
-struct efi_driver nii_driver __efi_driver ( EFI_DRIVER_NORMAL ) = {
+struct efi_driver nii_driver __efi_driver ( EFI_DRIVER_NII ) = {
 	.name = "NII",
 	.supported = nii_supported,
+	.exclude = nii_exclude,
 	.start = nii_start,
 	.stop = nii_stop,
 };
