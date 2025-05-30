@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dependencies
+
+- Bump `dangoslen/dependabot-changelog-helper` from 3 to 4 ([#40](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/40))
+
 ## [4.2.0] - 2025-05-27
 ### Changed
 - CASMTRIAGE-7409 vendor update upstream IPXE code to fix kernel panics on boot
