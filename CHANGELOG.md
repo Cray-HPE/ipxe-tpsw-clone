@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `dangoslen/dependabot-changelog-helper` from 3 to 4 ([#40](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/40))
 - Bump `actions/checkout` from 4 to 5 ([#45](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/45))
 - Bump `dangoslen/dependabot-changelog-helper` from 3 to 4 ([#40](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/40))
+- Bump `stefanzweifel/git-auto-commit-action` from 5 to 7 ([#46](https://github.com/Cray-HPE/ipxe-tpsw-clone/pull/46))
 
 ## [4.2.0] - 2025-05-27
 ### Changed
