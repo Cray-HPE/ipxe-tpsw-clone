@@ -31,6 +31,8 @@ ARG BASE_IMAGE_DISTRO=ubuntu
 ARG BASE_IMAGE_TAG=24.04
 ARG BASE_IMAGE=$UPSTREAM/$BASE_IMAGE_DISTRO:$BASE_IMAGE_TAG
 
+libfreetype6
+
 FROM $BASE_IMAGE as base
 LABEL vendor="Cray, Inc."
 
@@ -40,7 +42,20 @@ LABEL vendor="Cray, Inc."
 #    apt-get upgrade -y && apt full-upgrade -y
 
 RUN apt-get update && \
-    apt-get install -y --only-upgrade libfreetype6 && \
+    apt-get install -y \
+        gcc \
+        gcc-14 \
+        make \
+        gcc-aarch64-linux-gnu \
+        gcc-14-aarch64-linux-gnu \
+        liblzma-dev \
+        libfreetype6 \
+        genisoimage \
+        xz-utils \
+        libc-dev \
+        bash \
+        git && \
+    apt-get upgrade -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Add the source directory into the image
