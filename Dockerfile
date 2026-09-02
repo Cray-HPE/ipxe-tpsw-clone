@@ -33,10 +33,28 @@ ARG BASE_IMAGE=$UPSTREAM/$BASE_IMAGE_DISTRO:$BASE_IMAGE_TAG
 
 FROM $BASE_IMAGE as base
 LABEL vendor="Cray, Inc."
-RUN apt -y update && \
-    apt -y install gcc gcc-14 make gcc-aarch64-linux-gnu gcc-14-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
-                   genisoimage xz-utils libc-dev bash git && \
-    apt-get upgrade -y && apt full-upgrade -y
+
+# RUN apt -y update && \
+#    apt -y install gcc gcc-14 make gcc-aarch64-linux-gnu gcc-14-aarch64-linux-gnu lzma lzma-dev liblzma-dev \
+#                   genisoimage xz-utils libc-dev bash git && \
+#    apt-get upgrade -y && apt full-upgrade -y
+
+RUN apt-get update && \
+    apt-get install -y \
+        gcc \
+        gcc-14 \
+        make \
+        gcc-aarch64-linux-gnu \
+        gcc-14-aarch64-linux-gnu \
+        liblzma-dev \
+        libfreetype6 \
+        genisoimage \
+        xz-utils \
+        libc-dev \
+        bash \
+        git && \
+    apt-get upgrade -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Add the source directory into the image
 COPY vendor/github.com/Cray-HPE/ipxe/src /ipxe
